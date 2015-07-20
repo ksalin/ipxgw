@@ -1,0 +1,36 @@
+* * * * * * * * * * * * * * * * * * * * * * *
+* DOSBox IPXNET to real IPX network gateway *
+* * * * * * * * * * * * * * * * * * * * * * *
+
+Copyright (C) 2015 Jussi Salin under GPLv2
+Contains parts from DOSBox source code by The DOSBox Team, under GPLv2
+
+
+This is a small program which contains parts from DOSBox sources which
+enables it to act as a IPXNET server where DOSBox(es) can connect to.
+Besides being a dedicated server it also mirrors the IPX packets between
+a real physical ethernet network where real DOS computers can be
+connected to. This allows playing IPX games between real computers on
+one end and DOSBox emulators at another end.
+
+Command line help is self-explaining and copyright texts are in ipxgw.cpp.
+
+I was lazy and new so config.h has some hard values from AMD64 Linux system,
+which should suffice for most users. This has no autoconf - just run make.
+You need to have SDL 1.2, SDL_net and libpcap libraries with headers 
+installed besides g++ and standard C headers.
+
+This is untested with combination of multiple real DOS computers, but it
+works with at least one. Problem might also be if you use a switch and not
+a simple old hub with those multiple computers because some packets might
+not be visible to the gateway and therefore not sent to DOSBox(es).
+
+You might ask, why do this? Well, there exists NE2000 driver for DOSBox
+but that does not work over the Internet - it allows only a local DOS 
+computer to talk with a local DOSBox. This is the only way to allow
+remote DOSBox people to connect with your real DOS computer to play IPX
+games, as long as you can run the server.
+
+The code could be improved a lot as it was just quickly hacked together
+and then made to work with help of some wireshark debugging. Feel free
+to improve it as the license allows. My e-mail is salinjus@gmail.com.
