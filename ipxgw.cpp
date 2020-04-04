@@ -26,6 +26,7 @@
 #include <pcap.h>
 #include "SDL_net.h"
 #include <signal.h>
+#include <err.h>
 
 #define ETHER_ADDR_LEN 6				// Ethernet addresses are 6 bytes, for use with pcap
 #define ETHER_HEADER_LEN 14				// Ethernet header is two addresses and two bytes size, for use with pcap
@@ -332,16 +333,36 @@ void clean_shutdown(int signum)
 // Main program
 int main(int argc, char *argv[])
 {
+	int port = 213;
+	bool help = false;
+	int c;
+
+	while ((c = getopt (argc, argv, "p:h")) != -1)
+		switch (c)
+		{
+		case 'p':
+			port = atoi(optarg);
+			break;
+		case 'h':
+			help = true;
+		case '?':
+			exit(1);
+		default:
+			abort();
+		}
+
 	// Command line parameters
-	if (argc!=3)
+	if (optind+1 != argc || help)
 	{
-		printf("Usage: ipxgw <if> <port>\n");
-		printf("if = interface where real DOS computer is connected\n");
-		printf("port = Listened UDP port where DOSBox connects to, 213 is default\n");
-		return 1;
+		errx(1, "Usage: %s IF [-p PORT]\n\n"
+		     "Forwards IPX traffic between network interface "
+		     "IF where the real\ncomputers are located and DOSBox "
+		     "IPXNET.\n\nParameters:\n"
+		     " -p  UDP port where DOSBox connects to, defaults to 213",
+		     argv[0]);
 	}
-	strncpy(device, argv[1], sizeof(device));
-	port = atoi(argv[2]);
+
+	strncpy(device, argv[optind], sizeof(device));
 
 	// Open interface that has real DOS machine, in promiscuous mode
 	handle = pcap_open_live(device, BUFSIZ, 1, 0, errbuf);
