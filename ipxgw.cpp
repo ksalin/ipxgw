@@ -26,6 +26,7 @@
 #include <pcap.h>
 #include "SDL_net.h"
 #include <signal.h>
+#include <err.h>
 
 #define ETHER_ADDR_LEN 6				// Ethernet addresses are 6 bytes, for use with pcap
 #define ETHER_HEADER_LEN 14				// Ethernet header is two addresses and two bytes size, for use with pcap
@@ -82,6 +83,13 @@ struct packetBuffer {
 	bool inPacket;      // In packet reception flag
 	bool connected;		// Connected flag
 	bool waitsize;
+};
+
+// Hack to allow SDLNet pollable pcap socket. Adapted from
+// SDLnetselect.c in SDL_Net
+struct Pcap_Socket {
+	int ready;
+	SOCKET channel;
 };
 
 // Some globally shared variables
@@ -366,6 +374,24 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+ 	// Craft an SDL_net pollable pcap socket
+	struct Pcap_Socket sdlnet_pcap = {0, pcap_get_selectable_fd(handle)};
+	if (sdlnet_pcap.channel == PCAP_ERROR) {
+		errx(1, "Unable to get fd from pcap device\n");
+	}
+	
+	// Create SDL_net socket set
+	SDLNet_SocketSet socketSet = SDLNet_AllocSocketSet(2);
+	if(!socketSet) {
+		errx(1, "SDLNet_AllocSocketSet: %s\n", SDLNet_GetError());
+	}
+	if (SDLNet_UDP_AddSocket(socketSet, ipxServerSocket) == -1) {
+		errx(1, "SDLNet_AddSocket: %s\n", SDLNet_GetError());
+	}
+	if (SDLNet_UDP_AddSocket(socketSet, &sdlnet_pcap) == -1) {
+		errx(1, "SDLNet_AddSocket: %s\n", SDLNet_GetError());
+	}
+	
 	printf("\nYou can now write somewhere, on some DOSBox(es):\nIPXNET CONNECT <this host's ip> %i\n", port);
 	printf("Then, start IPX networking on real DOS computer(s) connected to %s.\n", device);
 	printf("Now you can start playing IPX games between them.\n\n");
@@ -377,8 +403,16 @@ int main(int argc, char *argv[])
 	// Main loop for exchanging packets and accepting connections
 	for(;;)
 	{
-		pcap_to_dosbox();
-		IPX_ServerLoop();
+		SDLNet_CheckSockets(socketSet, -1);
+		if (SDLNet_SocketReady(&sdlnet_pcap)) {
+			pcap_to_dosbox();
+			// Setting socket status manually to non-ready
+			// because read it outside SDLNet.
+			sdlnet_pcap.ready = 0;
+		}
+		if (SDLNet_SocketReady(ipxServerSocket)) {
+			IPX_ServerLoop();
+		}
 	}
 
 	return 0;
