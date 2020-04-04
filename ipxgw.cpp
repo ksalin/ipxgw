@@ -246,8 +246,9 @@ void IPX_ServerLoop() {
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
 
-		// Source and destination MAC can be ff:ff:ff:ff:ff:ff in case of IPX
-		memset(&ethernet[0], 0xff, ETHER_ADDR_LEN * 2); 
+		// Ethernet source and destination MACs are replicated from IPX header
+		memcpy(ethernet, tmpHeader->dest.addr.byNode.node, 6);
+		memcpy(ethernet+6, tmpHeader->src.addr.byNode.node, 6);
 
 		// Ethernet packet length
 		u_short ether_packet_len = inPacket.len + ENCAPSULE_LEN;
