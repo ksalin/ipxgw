@@ -13,7 +13,7 @@ Ipxgw requires libpcap, SDL 1.2, and SDL_net libraries with headers
 installed besides g++ and standard C headers to compile. If you are
 running Debian or Ubuntu, install requirements by running:
 
-	sudo apt install libpcap-dev libsdl-net1.2-dev
+	sudo apt install build-essential libpcap-dev libsdl-net1.2-dev 
 
 Then just:
 
