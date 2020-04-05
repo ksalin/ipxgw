@@ -63,8 +63,10 @@ IPXNET CONNECT 10.0.0.1 213
 
 ## Background
 
-I was lazy and new so config.h has some hard values from AMD64 Linux system,
-which should suffice for most users. This has no autoconf - just run make.
+We were lazy and so config.h has some hard-coded values. They should
+suffice for most users and the code compiles and works at least with
+both AMD64 Linux system and 32-bit Raspberry Pi. This has no
+autoconf - just run make.
 
 This is untested with combination of multiple real DOS computers, but it
 works with at least one. Problem might also be if you use a switch and not
