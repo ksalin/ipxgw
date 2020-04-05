@@ -404,7 +404,7 @@ int main(int argc, char *argv[])
 	for(;;)
 	{
 		SDLNet_CheckSockets(socketSet, -1);
-		if (SDLNet_SocketReady(&sdlnet_pcap)) {
+		if (sdlnet_pcap.ready) {
 			pcap_to_dosbox();
 			// Setting socket status manually to non-ready
 			// because read it outside SDLNet.
