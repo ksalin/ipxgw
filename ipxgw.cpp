@@ -185,6 +185,9 @@ static void ackClient(IPaddress clientAddr) {
 	regPacket.address = clientAddr;
 	// Send registration string to client.  If client doesn't get this, client will not be registered
 	result = SDLNet_UDP_Send(ipxServerSocket,-1,&regPacket);
+	if(result == 0) {
+		printf("IPXSERVER: %s\n", SDLNet_GetError());
+	}
 }
 
 // From DosBox ipxserver.cpp - receive packet and hand over to other clients
