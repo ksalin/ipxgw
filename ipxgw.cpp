@@ -36,6 +36,16 @@
 #define IPXBUFFERSIZE 1424				// From DosBox
 #undef DEBUG							// More output if defined
 
+/*!
+ * \brief In Winsock, a socket handle is of type SOCKET; in UN*X, it's
+ * a file descriptor, and therefore a signed integer.
+ * We define SOCKET to be a signed integer on UN*X, so that it can
+ * be used on both platforms. (from pcap/socket.h)
+ */
+#ifndef SOCKET
+#define SOCKET int
+#endif
+
 // From DosBox
 typedef Bit32u RealPt;
 
