@@ -37,6 +37,16 @@
 #define IPXBUFFERSIZE 1424				// From DosBox
 #undef DEBUG							// More output if defined
 
+/*!
+ * \brief In Winsock, a socket handle is of type SOCKET; in UN*X, it's
+ * a file descriptor, and therefore a signed integer.
+ * We define SOCKET to be a signed integer on UN*X, so that it can
+ * be used on both platforms. (from pcap/socket.h)
+ */
+#ifndef SOCKET
+#define SOCKET int
+#endif
+
 // From DosBox
 typedef Bit32u RealPt;
 
@@ -193,6 +203,9 @@ static void ackClient(IPaddress clientAddr) {
 	regPacket.address = clientAddr;
 	// Send registration string to client.  If client doesn't get this, client will not be registered
 	result = SDLNet_UDP_Send(ipxServerSocket,-1,&regPacket);
+	if(result == 0) {
+		printf("IPXSERVER: %s\n", SDLNet_GetError());
+	}
 }
 
 // From DosBox ipxserver.cpp - receive packet and hand over to other clients

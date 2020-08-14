@@ -1,10 +1,10 @@
 all: ipxgw
 
 ipxgw: ipxgw.o
-	g++ ipxgw.o -lpcap -lSDL -lSDL_net -o ipxgw
+	g++ -Wall ipxgw.o `pkg-config --libs SDL_net` -lpcap -o ipxgw
 
 ipxgw.o: ipxgw.cpp config.h
-	g++ -I/usr/include/SDL -c ipxgw.cpp
+	g++ -Wall `pkg-config --cflags SDL_net` -c ipxgw.cpp
 
 clean:
 	rm -fv *.o ipxgw
