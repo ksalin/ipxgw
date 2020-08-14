@@ -112,6 +112,7 @@ Bit8u inBuffer[IPXBUFFERSIZE];				// DosBOX
 IPaddress ipconn[SOCKETTABLESIZE];  		// Active TCP/IP connection 
 Uint16 port;								// UDP port to listen
 char device[20];							// Interface name
+bool use_llc = true; // Use Logical Link Control (IEEE 802.2)
 
 // From DosBox
 void UnpackIP(PackedIP ipPack, IPaddress * ipAddr) {
@@ -266,24 +267,27 @@ void IPX_ServerLoop() {
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
 
-		// Source and destination MAC can be ff:ff:ff:ff:ff:ff in case of IPX
-		memset(&ethernet[0], 0xff, ETHER_ADDR_LEN * 2); 
+		// Ethernet source and destination MACs are replicated from IPX header
+		memcpy(ethernet, tmpHeader->dest.addr.byNode.node, 6);
+		memcpy(ethernet+6, tmpHeader->src.addr.byNode.node, 6);
 
 		// Ethernet packet length
-		u_short ether_packet_len = inPacket.len + ENCAPSULE_LEN;
+		u_short ether_packet_len = inPacket.len + (use_llc ? ENCAPSULE_LEN : 0);
 		ether_packet_len = (ether_packet_len>>8) | (ether_packet_len<<8); // Swap endianess
 		memcpy(&ethernet[ETHER_ADDR_LEN * 2], &ether_packet_len, sizeof(ether_packet_len));
 		
 		// IPX over IP
-		ethernet[ETHER_HEADER_LEN + 0] = 0xe0;
-		ethernet[ETHER_HEADER_LEN + 1] = 0xe0;
-		ethernet[ETHER_HEADER_LEN + 2] = 0x03;
+		if (use_llc) {
+			ethernet[ETHER_HEADER_LEN + 0] = 0xe0;
+			ethernet[ETHER_HEADER_LEN + 1] = 0xe0;
+			ethernet[ETHER_HEADER_LEN + 2] = 0x03;
+		}
 
 		// IPX
-		memcpy(&ethernet[ETHER_HEADER_LEN + ENCAPSULE_LEN], inPacket.data, inPacket.len);
+		memcpy(&ethernet[ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)], inPacket.data, inPacket.len);
 
 		// Actual send
-		if (pcap_sendpacket(handle, &ethernet[0], ETHER_HEADER_LEN + ENCAPSULE_LEN + inPacket.len) != 0)
+		if (pcap_sendpacket(handle, &ethernet[0], ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0) + inPacket.len) != 0)
 		{
 			printf("Error sending the packet: %s\n", pcap_geterr(handle));
 		}
@@ -334,10 +338,10 @@ void pcap_to_dosbox()
 		#endif
 		
 		// Send to DOSBox
-		IPXHeader *tmpHeader = (IPXHeader *)(packet + ETHER_HEADER_LEN + ENCAPSULE_LEN);
-		sendIPXPacket((Bit8u *)tmpHeader, header.len - (ETHER_HEADER_LEN + ENCAPSULE_LEN));
+		IPXHeader *tmpHeader = (IPXHeader *)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
+		sendIPXPacket((Bit8u *)tmpHeader, header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
-		printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN + ENCAPSULE_LEN));
+		printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 	}
 }
 
@@ -353,16 +357,40 @@ void clean_shutdown(int signum)
 // Main program
 int main(int argc, char *argv[])
 {
+	int port = 213;
+	bool help = false;
+	int c;
+
+	while ((c = getopt (argc, argv, "p:rh")) != -1)
+		switch (c)
+		{
+		case 'p':
+			port = atoi(optarg);
+			break;
+		case 'r':
+			use_llc = false;
+			break;
+		case 'h':
+			help = true;
+		case '?':
+			exit(1);
+		default:
+			abort();
+		}
+
 	// Command line parameters
-	if (argc!=3)
+	if (optind+1 != argc || help)
 	{
-		printf("Usage: ipxgw <if> <port>\n");
-		printf("if = interface where real DOS computer is connected\n");
-		printf("port = Listened UDP port where DOSBox connects to, 213 is default\n");
-		return 1;
+		errx(1, "Usage: %s IF [-p PORT]\n\n"
+		     "Forwards IPX traffic between network interface "
+		     "IF where the real\ncomputers are located and DOSBox "
+		     "IPXNET.\n\nParameters:\n"
+		     " -p  UDP port where DOSBox connects to, defaults to 213\n"
+		     " -r  Use Novell raw IEEE 802.3 instead of LLC (IEEE 802.2)",
+		     argv[0]);
 	}
-	strncpy(device, argv[1], sizeof(device));
-	port = atoi(argv[2]);
+
+	strncpy(device, argv[optind], sizeof(device));
 
 	// Open interface that has real DOS machine, in promiscuous mode
 	handle = pcap_open_live(device, BUFSIZ, 1, 0, errbuf);
