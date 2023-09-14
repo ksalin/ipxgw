@@ -620,7 +620,7 @@ int main(int argc, char *argv[])
 	bool help = false;
 	int c;
 
-	while ((c = getopt (argc, argv, "p:rh")) != -1)
+	while ((c = getopt (argc, argv, "p:rhe")) != -1)
 		switch (c)
 		{
 		case 'p':
@@ -628,6 +628,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'r':
 			use_llc = false;
+			break;
+		case 'e':
+			use_ethernetii = true; //Use Ethernet II encapsulation and server!
 			break;
 		case 'h':
 			help = true;
@@ -645,7 +648,8 @@ int main(int argc, char *argv[])
 		     "IF where the real\ncomputers are located and DOSBox "
 		     "IPXNET.\n\nParameters:\n"
 		     " -p  UDP port where DOSBox connects to, defaults to 213\n"
-		     " -r  Use Novell raw IEEE 802.3 instead of LLC (IEEE 802.2)",
+		     " -r  Use Novell raw IEEE 802.3 instead of LLC (IEEE 802.2)"
+		     " -e  Use Ethernet II instead of 802.3/802.2",
 		     argv[0]);
 	}
 
