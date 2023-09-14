@@ -18,6 +18,8 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
+//Adjustments for Ethernet and UniPCemu-compatible allocation by Superfury
+
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -27,6 +29,7 @@
 #include "SDL_net.h"
 #include <signal.h>
 #include <err.h>
+#incluce <sys/time.h> //Timekeeping!
 
 #define ETHER_ADDR_LEN 6				// Ethernet addresses are 6 bytes, for use with pcap
 #define ETHER_HEADER_LEN 14				// Ethernet header is two addresses and two bytes size, for use with pcap
@@ -36,6 +39,9 @@
 #define CONVIPX(hostvar) hostvar[0], hostvar[1], hostvar[2], hostvar[3], hostvar[4], hostvar[5]					// From DosBox
 #define IPXBUFFERSIZE 1424				// From DosBox
 #undef DEBUG							// More output if defined
+
+//Timeout until a IPX node number is decided to be usable. Replies to the echo reset the timer until none reply within the timeout after the request.
+#define ALLOCATE_IPXNODE_ECHO_TIMEOUT 500000
 
 /*!
  * \brief In Winsock, a socket handle is of type SOCKET; in UN*X, it's
@@ -91,8 +97,11 @@ struct packetBuffer {
 	Bit16s packetSize;  // Packet size remaining in read
 	Bit16s packetRead;  // Bytes read of total packet
 	bool inPacket;      // In packet reception flag
-	bool connected;		// Connected flag
+	Bit8u connected;		// Connected flag. 0=Not connected, 1=Connected, 2=Requesting address by trying a echo with timeout.
 	bool waitsize;
+	Bit64u timer; //Timer for checking if a client exists.
+	struct timeval timerlast;
+	struct timeval timernow;
 };
 
 // Hack to allow SDLNet pollable pcap socket. Adapted from
@@ -110,9 +119,11 @@ UDPsocket ipxServerSocket;  				// Listening server socket
 packetBuffer connBuffer[SOCKETTABLESIZE];	// DosBOX
 Bit8u inBuffer[IPXBUFFERSIZE];				// DosBOX
 IPaddress ipconn[SOCKETTABLESIZE];  		// Active TCP/IP connection 
+IPaddress ipconnReal[SOCKETTABLESIZE];  		// Active TCP/IP connection's assigned IPX address!
 Uint16 port;								// UDP port to listen
 char device[20];							// Interface name
 bool use_llc = true; // Use Logical Link Control (IEEE 802.2)
+bool use_ethernetii = false; // Use Logical Link Control (IEEE 802.2)
 
 // From DosBox
 void UnpackIP(PackedIP ipPack, IPaddress * ipAddr) {
@@ -130,6 +141,50 @@ void PackIP(IPaddress ipAddr, PackedIP *ipPack) {
 void mac_to_string(const u_char mac[], char *str)
 {
 	sprintf(str, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+//Below IPX address functions and some reserved addresses copied from UniPCemu.
+//result: 1 for OK address. 0 for overflow! NULL and Broadcast and special addresses are skipped automatically. addrsizeleft should be 6 (the size of an IPX address)
+//Some reserved IPX addresses for special use (taken from UniPCemu)!
+byte ipxbroadcastaddr[6] = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF }; //IPX Broadcast address
+byte ipxnulladdr[6] = { 0x00,0x00,0x00,0x00,0x00,0x00 }; //IPX Forbidden NULL address
+byte ipx_servernodeaddr[6] = { 0x00,0x00,0x00,0x00,0x00,0x01 }; //IPX server node address!
+byte ipx_servernetworknumber[4] = { 0x00,0x00,0x00,0x01 }; //Server network number!
+uint8_t incIPXaddr2(byte* ipxaddr, byte addrsizeleft) //addrsizeleft=6 for the address specified
+{
+	uint8_t result;
+	uint8_t originaladdrsize;
+	originaladdrsize = addrsizeleft; //How much is left?
+	if (!addrsizeleft) return 0; //Nothing to allocate anymore?
+	++*ipxaddr; //Increase the address!
+	result = 1; //Default: OK!
+	if (*ipxaddr == 0) //Overflow?
+	{
+		result = incIPXaddr2(--ipxaddr, --addrsizeleft); //Try the next upper uint8_t!
+	}
+	addrsizeleft = originaladdrsize; //What were we processing?
+	if (addrsizeleft == 6) //No overflow for full address?
+	{
+		if (memcmp(ipxaddr - 5, &ipxbroadcastaddr, sizeof(ipxbroadcastaddr)) == 0) //Broadcast address? all ones.
+		{
+			return incIPXaddr2(ipxaddr, 6); //Increase to the first address, which we'll use!
+		}
+		if (memcmp(ipxaddr - 5, &ipxnulladdr, sizeof(ipxnulladdr)) == 0) //Null address? all zeroes.
+		{
+			return incIPXaddr2(ipxaddr, addrsizeleft); //Increase to the first address, which we'll use!
+		}
+		if (memcmp(ipxaddr - 5, &ipx_servernodeaddr, sizeof(ipx_servernodeaddr)) == 0) //Server address? ~01
+		{
+			return incIPXaddr2(ipxaddr, 6); //Increase to the next possible address, which we'll use!
+		}
+	}
+	return result; //Address is OK, if we've not overflown!
+}
+
+//ipxaddr must point to the first byte of the address (it's in big endian format)
+uint8_t incIPXaddr(uint8_t* ipxaddr)
+{
+	return incIPXaddr2(&ipxaddr[5], 6); //Increment the IPX address to a valid address from the LSB!
 }
 
 // From DosBox ipxserver.cpp - send packet to connected host
@@ -156,7 +211,7 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	if(desthost == 0xffffffff) {
 		// Broadcast
 		for(i=0;i<SOCKETTABLESIZE;i++) {
-			if(connBuffer[i].connected && ((ipconn[i].host != srchost)||(ipconn[i].port!=srcport))) {
+			if((connBuffer[i].connected==1) && ((ipconnReal[i].host != srchost)||(ipconnReal[i].port!=srcport))) {
 				outPacket.address = ipconn[i];
 				result = SDLNet_UDP_Send(ipxServerSocket,-1,&outPacket);
 				if(result == 0) {
@@ -168,7 +223,7 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	} else {
 		// Specific address
 		for(i=0;i<SOCKETTABLESIZE;i++) {
-			if((connBuffer[i].connected) && (ipconn[i].host == desthost) && (ipconn[i].port == destport)) {
+			if(((connBuffer[i].connected==1) && (ipconnReal[i].host == desthost) && (ipconnReal[i].port == destport)) {
 				outPacket.address = ipconn[i];
 				result = SDLNet_UDP_Send(ipxServerSocket,-1,&outPacket);
 				if(result == 0) {
@@ -181,16 +236,22 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 }
 
 // From DosBox ipxserver.cpp - acknowledge a new connection
-static void ackClient(IPaddress clientAddr) {
+static void ackClient(int client) {
+	IPaddress clientAddr;
+	IPaddress assignedAddr;
 	IPXHeader regHeader;
 	UDPpacket regPacket;
+	memcpy(&clientAddr, ipConn[client], sizeof(clientaddr)); //The clients host address and port!
+	memcpy(&assignedAddr, ipConnReal[client], sizeof(assignedaddr)); //The clients assigned address and port!
 	Bits result;
+	unsigned char ethernet[1500];
 
 	SDLNet_Write16(0xffff, regHeader.checkSum);
 	SDLNet_Write16(sizeof(regHeader), regHeader.length);
 	
+	//Dosbox-compatible values here:
 	SDLNet_Write32(0, regHeader.dest.network);
-	PackIP(clientAddr, &regHeader.dest.addr.byIP);
+	PackIP(assignedAddr, &regHeader.dest.addr.byIP);
 	SDLNet_Write16(0x2, regHeader.dest.socket);
 
 	SDLNet_Write32(1, regHeader.src.network);
@@ -201,12 +262,112 @@ static void ackClient(IPaddress clientAddr) {
 	regPacket.data = (Uint8 *)&regHeader;
 	regPacket.len = sizeof(regHeader);
 	regPacket.maxlen = sizeof(regHeader);
-	regPacket.address = clientAddr;
+	regPacket.address = clientAddr; //Client's real address and port it's listening on!
 	// Send registration string to client.  If client doesn't get this, client will not be registered
 	result = SDLNet_UDP_Send(ipxServerSocket,-1,&regPacket);
 	if(result == 0) {
 		printf("IPXSERVER: %s\n", SDLNet_GetError());
+		return; //Abort and don't perform the Ethernet ACK as well!
 	}
+
+	//Also let the host network know that we allocated if on a Ethernet II network!
+	if (use_ethernetii) //Ethernet II used?
+	{
+		// Create and send packet received from DosBox to the real network
+		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
+
+		ethernet[0] = ethernet[1] = ethernet[2] = ethernet[3] = ethernet[4] = ethernet[5] = 0xFF; //Destination: broadcast!
+		memcpy(ethernet + 6, regHeader->src.addr.byNode.node, 6); //Source: node!
+		ethernet[12] = 0x81;
+		ethernet[13] = 0x37; //IPX over ethernet!
+
+		//Slight modification in the packet for the ACK on the host network! From assigned address to server node address to register (if any is listening)!
+		SDLNet_Write32(0, regHeader.src.network);
+		PackIP(assignedAddr, &regHeader.src.addr.byIP);
+		SDLNet_Write16(0x2, regHeader.src.socket);
+
+		memcpy(&regHeader.dest.network,&ipx_servernetworknumber,4);
+		memcpy(& regHeader.dest.addr.byNode.node,&ipx_servernodeaddr,6); //Send to the a packet server registration, if any is listening and/or allocating!
+		SDLNet_Write16(0x2, regHeader.dest.socket);
+
+		// IPX
+		memcpy(&ethernet[ETHER_HEADER_LEN], regPacket.data, regPacket.len);
+		sendlen = ETHER_HEADER_LEN + regPacket.len; //Length to send!
+
+		// Actual send
+		if (pcap_sendpacket(handle, &ethernet[0], sendlen) != 0)
+		{
+			printf("Error sending the packet: %s\n", pcap_geterr(handle));
+		}
+		else
+		{
+			printf("ACK  -> real, IPX len=%i\n", regPacket.len);
+		}
+	}
+}
+
+// Adjusted from DosBox ipxserver.cpp - check a new connection for availability by echo.
+static void requestClientEcho(int client) {
+	IPaddress assignedAddr;
+	IPXHeader regHeader;
+	UDPpacket regPacket;
+	Bits result;
+	unsigned char ethernet[1500];
+	memcpy(&clientAddr, ipConn[client], sizeof(clientaddr)); //The clients host address and port!
+	memcpy(&assignedAddr, ipConnReal[client], sizeof(assignedaddr)); //The clients assigned address and port!
+
+	SDLNet_Write16(0xffff, regHeader.checkSum);
+	SDLNet_Write16(sizeof(regHeader), regHeader.length);
+
+	//Send it back to the client's requested address! This will also where it's returned to!
+	SDLNet_Write32(0, regHeader.src.network);
+	PackIP(assignedAddr, &regHeader.src.addr.byIP);
+	SDLNet_Write16(0x2, regHeader.src.socket);
+
+	//And send from us (and received from them) as a broadcast!
+	SDLNet_Write32(0, regHeader.dest.network);
+	memset(&regHeader.dest.addr.bynode.node, 0xFF, 6); //Broadcast it!
+	SDLNet_Write16(0x2, regHeader.dest.socket);
+	regHeader.transControl = 0;
+
+	regPacket.data = (Uint8*)&regHeader;
+	regPacket.len = sizeof(regHeader);
+	regPacket.maxlen = sizeof(regHeader);
+	regPacket.address = clientAddr; //Client's real address and port it's listening on!
+
+	//Send to all Dosbox-clients to detect if they're used!
+	sendIPXPacket(regPacket.data, regPacket.len); //Send to all Dosbox clients!
+
+	//Also let the host network know that we are trying to allocate if on a Ethernet II network!
+	if (use_ethernetii) //Ethernet II used?
+	{
+		// Create and send packet received from DosBox to the real network
+		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
+
+		ethernet[0] = ethernet[1] = ethernet[2] = ethernet[3] = ethernet[4] = ethernet[5] = 0xFF; //Destination: broadcast!
+		ethernet[6] = ethernet[7] = ethernet[8] = ethernet[9] = ethernet[10] = ethernet[11] = 0xFF; //Source: broadcast!
+		ethernet[12] = 0x81;
+		ethernet[13] = 0x37; //IPX over ethernet!
+
+		// IPX
+		memcpy(&ethernet[ETHER_HEADER_LEN], regPacket.data, regPacket.len);
+		sendlen = ETHER_HEADER_LEN + regPacket.len; //Length to send!
+
+		// Actual send
+		if (pcap_sendpacket(handle, &ethernet[0], sendlen) != 0)
+		{
+			printf("Error sending the packet: %s\n", pcap_geterr(handle));
+		}
+		else
+		{
+			printf("alloc request  -> real, IPX len=%i\n", regPacket.len);
+		}
+	}
+
+	//Initialize timers to setup a timeout!
+	gettimeofday(&connBuffer[i].timernow, NULL); //Init current time for timekeeping!
+	memcpy(&connBuffer[i].timerlast, &connbuffer[i].timernow, sizeof(connBuffer[i].timerlast)); //Copy to make them equal!
+	connBuffer[i].timer = 0; //Initialize to nothing ticked yet!
 }
 
 // From DosBox ipxserver.cpp - receive packet and hand over to other clients
@@ -218,6 +379,7 @@ void IPX_ServerLoop() {
 	Bit16u i;
 	Bit32u host;
 	Bits result;
+	Bit32u sendlen;
 
 	inPacket.channel = -1;
 	inPacket.data = &inBuffer[0];
@@ -240,19 +402,30 @@ void IPX_ServerLoop() {
 						// Use prefered host IP rather than the reported source IP
 						// It may be better to use the reported source
 						ipconn[i] = inPacket.address;
+						ipconnAssigned[i] = inPacket.address;
+						if (use_ethernetii) //Request the connection IPX node number first?
+						{
+							connBuffer[i].connected = 2; //Requesting IPX address from the host!
+							//Send a echo request packet on the host network to detect for collisions on used addresses!
 
-						connBuffer[i].connected = true;
-						host = ipconn[i].host;
-						printf("IPXSERVER: Connect from %d.%d.%d.%d\n", CONVIP(host));
-						ackClient(inPacket.address);
+							requestClientEcho(i); //Request a client echo packet!
+						}
+						else //Just assume connected with available IPX node number!
+						{
+							connBuffer[i].connected = 1;
+							host = ipconn[i].host;
+							printf("IPXSERVER: Connect from %d.%d.%d.%d\n", CONVIP(host));
+
+							ackClient(i);
+						}
 						return;
-					} else {
+					} else if (connBuffer[i].connected==1) { //Connected client might be reconnecting?
 						if((ipconn[i].host == tmpAddr.host) && (ipconn[i].port == tmpAddr.port)) {
 
 							printf("IPXSERVER: Reconnect from %d.%d.%d.%d\n", CONVIP(tmpAddr.host));
 							// Update anonymous port number if changed
 							ipconn[i].port = inPacket.address.port;
-							ackClient(inPacket.address);
+							ackClient(i);
 							return;
 						}
 					}
@@ -266,28 +439,44 @@ void IPX_ServerLoop() {
 
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
+		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
 
-		// Ethernet source and destination MACs are replicated from IPX header
-		memcpy(ethernet, tmpHeader->dest.addr.byNode.node, 6);
-		memcpy(ethernet+6, tmpHeader->src.addr.byNode.node, 6);
+		if (!use_ethernetii) //Not ethernet II?
+		{
+			// Ethernet source and destination MACs are replicated from IPX header
+			memcpy(ethernet, tmpHeader->dest.addr.byNode.node, 6);
+			memcpy(ethernet + 6, tmpHeader->src.addr.byNode.node, 6);
 
-		// Ethernet packet length
-		u_short ether_packet_len = inPacket.len + (use_llc ? ENCAPSULE_LEN : 0);
-		ether_packet_len = (ether_packet_len>>8) | (ether_packet_len<<8); // Swap endianess
-		memcpy(&ethernet[ETHER_ADDR_LEN * 2], &ether_packet_len, sizeof(ether_packet_len));
-		
-		// IPX over IP
-		if (use_llc) {
-			ethernet[ETHER_HEADER_LEN + 0] = 0xe0;
-			ethernet[ETHER_HEADER_LEN + 1] = 0xe0;
-			ethernet[ETHER_HEADER_LEN + 2] = 0x03;
+			// Ethernet packet length
+			u_short ether_packet_len = inPacket.len + (use_llc ? ENCAPSULE_LEN : 0);
+			ether_packet_len = (ether_packet_len >> 8) | (ether_packet_len << 8); // Swap endianess
+			memcpy(&ethernet[ETHER_ADDR_LEN * 2], &ether_packet_len, sizeof(ether_packet_len));
+
+			// IPX over IP
+			if (use_llc) {
+				ethernet[ETHER_HEADER_LEN + 0] = 0xe0;
+				ethernet[ETHER_HEADER_LEN + 1] = 0xe0;
+				ethernet[ETHER_HEADER_LEN + 2] = 0x03;
+			}
+
+			// IPX
+			memcpy(&ethernet[ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)], inPacket.data, inPacket.len);
+			sendlen = ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0) + inPacket.len; //Length to send!
+		}
+		else //Ethernet II?
+		{
+			ethernet[0] = ethernet[1] = ethernet[2] = ethernet[3] = ethernet[4] = ethernet[5] = 0xFF; //Destination: broadcast!
+			memcpy(ethernet + 6, tmpHeader->src.addr.byNode.node, 6); //Source: node!
+			ethernet[12] = 0x81;
+			ethernet[13] = 0x37; //IPX over ethernet!
+
+			// IPX
+			memcpy(&ethernet[ETHER_HEADER_LEN], inPacket.data, inPacket.len);
+			sendlen = ETHER_HEADER_LEN + inPacket.len; //Length to send!
 		}
 
-		// IPX
-		memcpy(&ethernet[ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)], inPacket.data, inPacket.len);
-
 		// Actual send
-		if (pcap_sendpacket(handle, &ethernet[0], ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0) + inPacket.len) != 0)
+		if (pcap_sendpacket(handle, &ethernet[0], sendlen) != 0)
 		{
 			printf("Error sending the packet: %s\n", pcap_geterr(handle));
 		}
@@ -322,26 +511,96 @@ bool IPX_StartServer(Bit16u portnum) {
 // Capture real packets with pcap and send them to dosbox network
 void pcap_to_dosbox()
 {
+	uint8_t ipxaddr;
 	struct pcap_pkthdr header;	// The header that pcap gives us
 	const u_char *packet;		// The actual packet
 	char smac[20], dmac[20];
 	
 	packet = pcap_next(handle, &header);
-	if ((packet != 0) && (header.len >= (14 + 3)))
+	if (!use_ethernetii)
 	{
-		const struct sniff_ethernet *ethernet = (struct sniff_ethernet*)(packet);
-		mac_to_string(ethernet->ether_shost, &smac[0]);
-		mac_to_string(ethernet->ether_dhost, &dmac[0]);
-		
-		#ifdef DEBUG
-		printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
-		#endif
-		
-		// Send to DOSBox
-		IPXHeader *tmpHeader = (IPXHeader *)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
-		sendIPXPacket((Bit8u *)tmpHeader, header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+		if ((packet != 0) && (header.len >= (14 + 3)))
+		{
+			const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
+			mac_to_string(ethernet->ether_shost, &smac[0]);
+			mac_to_string(ethernet->ether_dhost, &dmac[0]);
 
-		printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+#ifdef DEBUG
+			printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
+#endif
+
+			// Send to DOSBox
+			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
+			sendIPXPacket((Bit8u*)tmpHeader, header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+
+			printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+		}
+	}
+	else //Ethernet II?
+	{
+		if ((packet != 0) && (header.len >= (14+30))) //Ethernet Header and IPX header minimum length?
+		{
+			if ((packet[12] == 0x81) && (packet[13] == 0x37)) //IPX?
+			{
+				// Create and send packet received from DosBox to the real network
+				unsigned char ethernet[1500];
+				memset(&ethernet, 0, sizeof(ethernet)); //Clear!
+
+				//Check for a registration packet.
+				// For this, I just spoofed the echo protocol packet designation 0x02
+				IPXHeader* tmpHeader;
+				tmpHeader = (IPXHeader*)&inBuffer[0x14]; //The IPX packet!
+
+				// Check to see if echo packet
+				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
+					// Our destination node means its a server registration already used packet if allocating.
+						for (i = 0; i < SOCKETTABLESIZE; i++) {
+							if (connBuffer[i].connected) { //Connected or requesting?
+								UnpackIP(tmpHeader->src.addr.byIP, &tmpAddr); //The requested address!
+								if ((ipconn[i].host == tmpAddr.host) && (ipconn[i].port == tmpAddr.port) && (connBuffer[i].connected == 2)) { //Requesting an answer to detect in-use?
+								{
+									//Convert IPX node number to a byte array, increment and try the next in range!
+									memcpy(&ipxaddr[0], ipconn[i].host, 4); //Host!
+									memcpy(&ipxaddr[4], tmpaddr.port, 2); //Port!
+									incIPXaddr(&ipxaddr[0]); //Next available address!
+									memcpy(&ipconn[i].host,&ipxaddr[0], 4); //Host!
+									memcpy(&ipconn[0].port,&ipxaddr[4], 2); //Port!
+									PackIP(&ipconn[i], tmpHeader->src.addr);
+									requestClientEcho(i); //Send a new client echo packet on the hosts to try the next IPX node number!
+								}
+							}
+					}
+				}
+
+				//Normal packet!
+				const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
+				mac_to_string(ethernet->ether_shost, &smac[0]);
+				mac_to_string(ethernet->ether_dhost, &dmac[0]);
+
+#ifdef DEBUG
+				printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
+#endif
+				// Send to DOSBox
+				IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN);
+				sendIPXPacket((Bit8u*)tmpHeader, header.len - (ETHER_HEADER_LEN));
+
+				printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN));
+			}
+		}
+
+		//Check for timers!
+		for (i = 0; i < SOCKETTABLESIZE; i++) {
+			if (connBuffer[i].connected == 2) { //Connected and waiting?
+				memcpy(&connBuffer[i].timerlast, &connBuffer[i].timernow, sizeof(connBuffer[i].timerlast)); //Copy for checking difference!
+				gettimeofday(&connBuffer[i].timernow, NULL); //Get time of day!
+				connBuffer[i].timer += ((connBuffer[i].timernow.tv_sec * 1000000) + connBuffer[i].timernow.tv_usec) - ((connBuffer[i].timerlast.tv_sec * 1000000) + connBuffer[i].timerlast.tv_usec); //Time what's elapsed!
+				if (connBuffer[i].timer >= ALLOCATE_IPXNODE_ECHO_TIMEOUT) //Timer elapsed without reply? The IPX node number isn't deemed to be used!
+				{
+					connBuffer[i].connected = 1; //Connected using the allocated address!
+					ackClient(i); //Acknowledge the client!
+				}
+			}
+		}
 	}
 }
 
