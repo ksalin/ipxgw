@@ -38,6 +38,15 @@ to change the frame structure with Ipxgw `-r` switch. For example:
 
 	ipxgw -r eth0
 
+If your computers in real network are running Ethernet II
+IPX stack instead of IEEE 802.x, then you need
+to change the frame structure with Ipxgw `-e` switch. For example:
+
+	ipxgw -e eth0
+
+Ethernet II also adds dynamic IPX node number allocation on the host
+network, to prevent conflicting IPX node numbers.
+
 More information at [Wikipedia](https://en.wikipedia.org/wiki/Ethernet_frame#Novell_raw_IEEE_802.3).
 
 ## DOSBox configuration
