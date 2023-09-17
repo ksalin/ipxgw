@@ -655,7 +655,7 @@ int main(int argc, char *argv[])
 		     "IF where the real\ncomputers are located and DOSBox "
 		     "IPXNET.\n\nParameters:\n"
 		     " -p  UDP port where DOSBox connects to, defaults to 213\n"
-		     " -r  Use Novell raw IEEE 802.3 instead of LLC (IEEE 802.2)"
+		     " -r  Use Novell raw IEEE 802.3 instead of LLC (IEEE 802.2)\n"
 		     " -e  Use Ethernet II instead of 802.3/802.2",
 		     argv[0]);
 	}
