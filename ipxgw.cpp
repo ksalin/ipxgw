@@ -29,7 +29,7 @@
 #include "SDL_net.h"
 #include <signal.h>
 #include <err.h>
-#incluce <sys/time.h> //Timekeeping!
+#include <sys/time.h> //Timekeeping!
 
 #define ETHER_ADDR_LEN 6				// Ethernet addresses are 6 bytes, for use with pcap
 #define ETHER_HEADER_LEN 14				// Ethernet header is two addresses and two bytes size, for use with pcap
@@ -99,9 +99,11 @@ struct packetBuffer {
 	bool inPacket;      // In packet reception flag
 	Bit8u connected;		// Connected flag. 0=Not connected, 1=Connected, 2=Requesting address by trying a echo with timeout.
 	bool waitsize;
-	Bit64u timer; //Timer for checking if a client exists.
+	//Timer for checking if a client exists.
+	Bit64u timer;
 	struct timeval timerlast;
 	struct timeval timernow;
+	//End of timer variables.
 };
 
 // Hack to allow SDLNet pollable pcap socket. Adapted from
@@ -119,7 +121,7 @@ UDPsocket ipxServerSocket;  				// Listening server socket
 packetBuffer connBuffer[SOCKETTABLESIZE];	// DosBOX
 Bit8u inBuffer[IPXBUFFERSIZE];				// DosBOX
 IPaddress ipconn[SOCKETTABLESIZE];  		// Active TCP/IP connection 
-IPaddress ipconnReal[SOCKETTABLESIZE];  		// Active TCP/IP connection's assigned IPX address!
+IPaddress ipconnAssigned[SOCKETTABLESIZE];  		// Active TCP/IP connection's assigned IPX address!
 Uint16 port;								// UDP port to listen
 char device[20];							// Interface name
 bool use_llc = true; // Use Logical Link Control (IEEE 802.2)
@@ -146,11 +148,11 @@ void mac_to_string(const u_char mac[], char *str)
 //Below IPX address functions and some reserved addresses copied from UniPCemu.
 //result: 1 for OK address. 0 for overflow! NULL and Broadcast and special addresses are skipped automatically. addrsizeleft should be 6 (the size of an IPX address)
 //Some reserved IPX addresses for special use (taken from UniPCemu)!
-byte ipxbroadcastaddr[6] = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF }; //IPX Broadcast address
-byte ipxnulladdr[6] = { 0x00,0x00,0x00,0x00,0x00,0x00 }; //IPX Forbidden NULL address
-byte ipx_servernodeaddr[6] = { 0x00,0x00,0x00,0x00,0x00,0x01 }; //IPX server node address!
-byte ipx_servernetworknumber[4] = { 0x00,0x00,0x00,0x01 }; //Server network number!
-uint8_t incIPXaddr2(byte* ipxaddr, byte addrsizeleft) //addrsizeleft=6 for the address specified
+uint8_t ipxbroadcastaddr[6] = { 0xFF,0xFF,0xFF,0xFF,0xFF,0xFF }; //IPX Broadcast address
+uint8_t ipxnulladdr[6] = { 0x00,0x00,0x00,0x00,0x00,0x00 }; //IPX Forbidden NULL address
+uint8_t ipx_servernodeaddr[6] = { 0x00,0x00,0x00,0x00,0x00,0x01 }; //IPX server node address!
+uint8_t ipx_servernetworknumber[4] = { 0x00,0x00,0x00,0x01 }; //Server network number!
+uint8_t incIPXaddr2(uint8_t* ipxaddr, uint8_t addrsizeleft) //addrsizeleft=6 for the address specified
 {
 	uint8_t result;
 	uint8_t originaladdrsize;
@@ -160,7 +162,7 @@ uint8_t incIPXaddr2(byte* ipxaddr, byte addrsizeleft) //addrsizeleft=6 for the a
 	result = 1; //Default: OK!
 	if (*ipxaddr == 0) //Overflow?
 	{
-		result = incIPXaddr2(--ipxaddr, --addrsizeleft); //Try the next upper uint8_t!
+		result = incIPXaddr2(--ipxaddr, --addrsizeleft); //Try the next upper byte!
 	}
 	addrsizeleft = originaladdrsize; //What were we processing?
 	if (addrsizeleft == 6) //No overflow for full address?
@@ -211,7 +213,7 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	if(desthost == 0xffffffff) {
 		// Broadcast
 		for(i=0;i<SOCKETTABLESIZE;i++) {
-			if((connBuffer[i].connected==1) && ((ipconnReal[i].host != srchost)||(ipconnReal[i].port!=srcport))) {
+			if((connBuffer[i].connected==1) && ((ipconnAssigned[i].host != srchost)||(ipconnAssigned[i].port!=srcport))) {
 				outPacket.address = ipconn[i];
 				result = SDLNet_UDP_Send(ipxServerSocket,-1,&outPacket);
 				if(result == 0) {
@@ -223,7 +225,7 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	} else {
 		// Specific address
 		for(i=0;i<SOCKETTABLESIZE;i++) {
-			if(((connBuffer[i].connected==1) && (ipconnReal[i].host == desthost) && (ipconnReal[i].port == destport)) {
+			if((connBuffer[i].connected==1) && (ipconnAssigned[i].host == desthost) && (ipconnAssigned[i].port == destport)) {
 				outPacket.address = ipconn[i];
 				result = SDLNet_UDP_Send(ipxServerSocket,-1,&outPacket);
 				if(result == 0) {
@@ -237,12 +239,13 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 
 // From DosBox ipxserver.cpp - acknowledge a new connection
 static void ackClient(int client) {
+	Bit32u sendlen;
 	IPaddress clientAddr;
 	IPaddress assignedAddr;
 	IPXHeader regHeader;
 	UDPpacket regPacket;
-	memcpy(&clientAddr, ipConn[client], sizeof(clientaddr)); //The clients host address and port!
-	memcpy(&assignedAddr, ipConnReal[client], sizeof(assignedaddr)); //The clients assigned address and port!
+	memcpy(&clientAddr, &ipconn[client], sizeof(clientAddr)); //The clients host address and port!
+	memcpy(&assignedAddr, &ipconnAssigned[client], sizeof(assignedAddr)); //The clients assigned address and port!
 	Bits result;
 	unsigned char ethernet[1500];
 
@@ -277,7 +280,7 @@ static void ackClient(int client) {
 		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
 
 		ethernet[0] = ethernet[1] = ethernet[2] = ethernet[3] = ethernet[4] = ethernet[5] = 0xFF; //Destination: broadcast!
-		memcpy(ethernet + 6, regHeader->src.addr.byNode.node, 6); //Source: node!
+		memcpy(ethernet + 6, regHeader.src.addr.byNode.node, 6); //Source: node!
 		ethernet[12] = 0x81;
 		ethernet[13] = 0x37; //IPX over ethernet!
 
@@ -308,13 +311,14 @@ static void ackClient(int client) {
 
 // Adjusted from DosBox ipxserver.cpp - check a new connection for availability by echo.
 static void requestClientEcho(int client) {
+	Bit32u sendlen;
+	IPaddress clientAddr;
 	IPaddress assignedAddr;
 	IPXHeader regHeader;
 	UDPpacket regPacket;
-	Bits result;
 	unsigned char ethernet[1500];
-	memcpy(&clientAddr, ipConn[client], sizeof(clientaddr)); //The clients host address and port!
-	memcpy(&assignedAddr, ipConnReal[client], sizeof(assignedaddr)); //The clients assigned address and port!
+	memcpy(&clientAddr, &ipconn[client], sizeof(clientAddr)); //The clients host address and port!
+	memcpy(&assignedAddr, &ipconnAssigned[client], sizeof(assignedAddr)); //The clients assigned address and port!
 
 	SDLNet_Write16(0xffff, regHeader.checkSum);
 	SDLNet_Write16(sizeof(regHeader), regHeader.length);
@@ -326,7 +330,7 @@ static void requestClientEcho(int client) {
 
 	//And send from us (and received from them) as a broadcast!
 	SDLNet_Write32(0, regHeader.dest.network);
-	memset(&regHeader.dest.addr.bynode.node, 0xFF, 6); //Broadcast it!
+	memset(&regHeader.dest.addr.byNode.node, 0xFF, 6); //Broadcast it!
 	SDLNet_Write16(0x2, regHeader.dest.socket);
 	regHeader.transControl = 0;
 
@@ -365,9 +369,9 @@ static void requestClientEcho(int client) {
 	}
 
 	//Initialize timers to setup a timeout!
-	gettimeofday(&connBuffer[i].timernow, NULL); //Init current time for timekeeping!
-	memcpy(&connBuffer[i].timerlast, &connbuffer[i].timernow, sizeof(connBuffer[i].timerlast)); //Copy to make them equal!
-	connBuffer[i].timer = 0; //Initialize to nothing ticked yet!
+	gettimeofday(&connBuffer[client].timernow, NULL); //Init current time for timekeeping!
+	memcpy(&connBuffer[client].timerlast, &connBuffer[client].timernow, sizeof(connBuffer[client].timerlast)); //Copy to make them equal!
+	connBuffer[client].timer = 0; //Initialize to nothing ticked yet!
 }
 
 // From DosBox ipxserver.cpp - receive packet and hand over to other clients
@@ -511,7 +515,8 @@ bool IPX_StartServer(Bit16u portnum) {
 // Capture real packets with pcap and send them to dosbox network
 void pcap_to_dosbox()
 {
-	uint8_t ipxaddr;
+	Bit16u i;
+	uint8_t ipxaddr[6];
 	struct pcap_pkthdr header;	// The header that pcap gives us
 	const u_char *packet;		// The actual packet
 	char smac[20], dmac[20];
@@ -538,12 +543,13 @@ void pcap_to_dosbox()
 	}
 	else //Ethernet II?
 	{
-		if ((packet != 0) && (header.len >= (14+30))) //Ethernet Header and IPX header minimum length?
+		if ((packet != 0) && (header.len >= (14 + 30))) //Ethernet Header and IPX header minimum length?
 		{
 			if ((packet[12] == 0x81) && (packet[13] == 0x37)) //IPX?
 			{
 				// Create and send packet received from DosBox to the real network
 				unsigned char ethernet[1500];
+				IPaddress tmpAddr;
 				memset(&ethernet, 0, sizeof(ethernet)); //Clear!
 
 				//Check for a registration packet.
@@ -554,50 +560,51 @@ void pcap_to_dosbox()
 				// Check to see if echo packet
 				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
 					// Our destination node means its a server registration already used packet if allocating.
-						for (i = 0; i < SOCKETTABLESIZE; i++) {
-							if (connBuffer[i].connected) { //Connected or requesting?
-								UnpackIP(tmpHeader->src.addr.byIP, &tmpAddr); //The requested address!
-								if ((ipconn[i].host == tmpAddr.host) && (ipconn[i].port == tmpAddr.port) && (connBuffer[i].connected == 2)) { //Requesting an answer to detect in-use?
+					for (i = 0; i < SOCKETTABLESIZE; i++) {
+						if (connBuffer[i].connected) { //Connected or requesting?
+							UnpackIP(tmpHeader->src.addr.byIP, &tmpAddr); //The requested address!
+							if ((ipconnAssigned[i].host == tmpAddr.host) && (ipconnAssigned[i].port == tmpAddr.port) && (connBuffer[i].connected == 2)) { //Requesting an answer to detect in-use?
 								{
 									//Convert IPX node number to a byte array, increment and try the next in range!
-									memcpy(&ipxaddr[0], ipconn[i].host, 4); //Host!
-									memcpy(&ipxaddr[4], tmpaddr.port, 2); //Port!
+									memcpy(&ipxaddr[0], &ipconnAssigned[i].host, 4); //Host!
+									memcpy(&ipxaddr[4], &ipconnAssigned[i].port, 2); //Port!
 									incIPXaddr(&ipxaddr[0]); //Next available address!
-									memcpy(&ipconn[i].host,&ipxaddr[0], 4); //Host!
-									memcpy(&ipconn[0].port,&ipxaddr[4], 2); //Port!
-									PackIP(&ipconn[i], tmpHeader->src.addr);
+									memcpy(&ipconnAssigned[i].host, &ipxaddr[0], 4); //Host!
+									memcpy(&ipconnAssigned[i].port, &ipxaddr[4], 2); //Port!
+									PackIP(ipconnAssigned[i], &tmpHeader->src.addr.byIP);
 									requestClientEcho(i); //Send a new client echo packet on the hosts to try the next IPX node number!
 								}
 							}
+						}
 					}
-				}
 
-				//Normal packet!
-				const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
-				mac_to_string(ethernet->ether_shost, &smac[0]);
-				mac_to_string(ethernet->ether_dhost, &dmac[0]);
+					//Normal packet!
+					const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
+					mac_to_string(ethernet->ether_shost, &smac[0]);
+					mac_to_string(ethernet->ether_dhost, &dmac[0]);
 
 #ifdef DEBUG
-				printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
+					printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
 #endif
-				// Send to DOSBox
-				IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN);
-				sendIPXPacket((Bit8u*)tmpHeader, header.len - (ETHER_HEADER_LEN));
+					// Send to DOSBox
+					IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN);
+					sendIPXPacket((Bit8u*)tmpHeader, header.len - (ETHER_HEADER_LEN));
 
-				printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN));
+					printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN));
+				}
 			}
-		}
 
-		//Check for timers!
-		for (i = 0; i < SOCKETTABLESIZE; i++) {
-			if (connBuffer[i].connected == 2) { //Connected and waiting?
-				memcpy(&connBuffer[i].timerlast, &connBuffer[i].timernow, sizeof(connBuffer[i].timerlast)); //Copy for checking difference!
-				gettimeofday(&connBuffer[i].timernow, NULL); //Get time of day!
-				connBuffer[i].timer += ((connBuffer[i].timernow.tv_sec * 1000000) + connBuffer[i].timernow.tv_usec) - ((connBuffer[i].timerlast.tv_sec * 1000000) + connBuffer[i].timerlast.tv_usec); //Time what's elapsed!
-				if (connBuffer[i].timer >= ALLOCATE_IPXNODE_ECHO_TIMEOUT) //Timer elapsed without reply? The IPX node number isn't deemed to be used!
-				{
-					connBuffer[i].connected = 1; //Connected using the allocated address!
-					ackClient(i); //Acknowledge the client!
+			//Check for timers!
+			for (i = 0; i < SOCKETTABLESIZE; i++) {
+				if (connBuffer[i].connected == 2) { //Connected and waiting?
+					memcpy(&connBuffer[i].timerlast, &connBuffer[i].timernow, sizeof(connBuffer[i].timerlast)); //Copy for checking difference!
+					gettimeofday(&connBuffer[i].timernow, NULL); //Get time of day!
+					connBuffer[i].timer += ((connBuffer[i].timernow.tv_sec * 1000000) + connBuffer[i].timernow.tv_usec) - ((connBuffer[i].timerlast.tv_sec * 1000000) + connBuffer[i].timerlast.tv_usec); //Time what's elapsed!
+					if (connBuffer[i].timer >= ALLOCATE_IPXNODE_ECHO_TIMEOUT) //Timer elapsed without reply? The IPX node number isn't deemed to be used!
+					{
+						connBuffer[i].connected = 1; //Connected using the allocated address!
+						ackClient(i); //Acknowledge the client!
+					}
 				}
 			}
 		}
