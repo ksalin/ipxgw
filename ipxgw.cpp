@@ -517,14 +517,16 @@ void pcap_to_dosbox()
 {
 	Bit16u i;
 	uint8_t ipxaddr[6];
-	struct pcap_pkthdr header;	// The header that pcap gives us
+	struct pcap_pkthdr *header;	// The header that pcap gives us
+	struct pcap_pkthdr realheader;	// The header that pcap gives us
 	const u_char *packet;		// The actual packet
 	char smac[20], dmac[20];
 	
-	packet = pcap_next(handle, &header);
 	if (!use_ethernetii)
 	{
-		if ((packet != 0) && (header.len >= (14 + 3)))
+		packet = pcap_next(handle, &realheader);
+		header = &realheader;
+		if ((packet != 0) && (header->len >= (14 + 3)))
 		{
 			const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
 			mac_to_string(ethernet->ether_shost, &smac[0]);
@@ -536,21 +538,20 @@ void pcap_to_dosbox()
 
 			// Send to DOSBox
 			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
-			sendIPXPacket((Bit8u*)tmpHeader, header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
-			printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+			printf("real -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 		}
 	}
 	else //Ethernet II?
 	{
-		if ((packet != 0) && (header.len >= (14 + 30))) //Ethernet Header and IPX header minimum length?
+		if (pcap_next_ex(handle,&header,&packet)<=0) return; //Poll manually!
+		if ((packet != 0) && (header->len >= (14 + 30))) //Ethernet Header and IPX header minimum length?
 		{
 			if ((packet[12] == 0x81) && (packet[13] == 0x37)) //IPX?
 			{
 				// Create and send packet received from DosBox to the real network
-				unsigned char ethernet[1500];
 				IPaddress tmpAddr;
-				memset(&ethernet, 0, sizeof(ethernet)); //Clear!
 
 				//Check for a registration packet.
 				// For this, I just spoofed the echo protocol packet designation 0x02
@@ -564,34 +565,31 @@ void pcap_to_dosbox()
 						if (connBuffer[i].connected) { //Connected or requesting?
 							UnpackIP(tmpHeader->src.addr.byIP, &tmpAddr); //The requested address!
 							if ((ipconnAssigned[i].host == tmpAddr.host) && (ipconnAssigned[i].port == tmpAddr.port) && (connBuffer[i].connected == 2)) { //Requesting an answer to detect in-use?
-								{
-									//Convert IPX node number to a byte array, increment and try the next in range!
-									memcpy(&ipxaddr[0], &ipconnAssigned[i].host, 4); //Host!
-									memcpy(&ipxaddr[4], &ipconnAssigned[i].port, 2); //Port!
-									incIPXaddr(&ipxaddr[0]); //Next available address!
-									memcpy(&ipconnAssigned[i].host, &ipxaddr[0], 4); //Host!
-									memcpy(&ipconnAssigned[i].port, &ipxaddr[4], 2); //Port!
-									PackIP(ipconnAssigned[i], &tmpHeader->src.addr.byIP);
-									requestClientEcho(i); //Send a new client echo packet on the hosts to try the next IPX node number!
-								}
+								//Convert IPX node number to a byte array, increment and try the next in range!
+								memcpy(&ipxaddr[0], &ipconnAssigned[i].host, 4); //Host!
+								memcpy(&ipxaddr[4], &ipconnAssigned[i].port, 2); //Port!
+								incIPXaddr(&ipxaddr[0]); //Next available address!
+								memcpy(&ipconnAssigned[i].host, &ipxaddr[0], 4); //Host!
+								memcpy(&ipconnAssigned[i].port, &ipxaddr[4], 2); //Port!
+								PackIP(ipconnAssigned[i], &tmpHeader->src.addr.byIP);
+								requestClientEcho(i); //Send a new client echo packet on the hosts to try the next IPX node number!
 							}
 						}
 					}
+				}
 
-					//Normal packet!
-					const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
-					mac_to_string(ethernet->ether_shost, &smac[0]);
-					mac_to_string(ethernet->ether_dhost, &dmac[0]);
+				//Normal packet!
+				const struct sniff_ethernet* ethernet = (struct sniff_ethernet*)(packet);
+				mac_to_string(ethernet->ether_shost, &smac[0]);
+				mac_to_string(ethernet->ether_dhost, &dmac[0]);
 
 #ifdef DEBUG
-					printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
+				printf("Captured packet, len=%d, src=%s, dest=%s, ether_type=%i\n", header.len, smac, dmac, ethernet->ether_type);
 #endif
-					// Send to DOSBox
-					IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN);
-					sendIPXPacket((Bit8u*)tmpHeader, header.len - (ETHER_HEADER_LEN));
-
-					printf("real -> box , IPX len=%i\n", header.len - (ETHER_HEADER_LEN));
-				}
+				// Send to DOSBox
+				tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN);
+				sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN));
+				printf("real -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN));
 			}
 
 			//Check for timers!
@@ -720,6 +718,10 @@ int main(int argc, char *argv[])
 			// Setting socket status manually to non-ready
 			// because read it outside SDLNet.
 			sdlnet_pcap.ready = 0;
+		}
+		else if (use_ethernetii)
+		{
+			pcap_to_dosbox(); //Manual update!			
 		}
 		if (SDLNet_SocketReady(ipxServerSocket)) {
 			IPX_ServerLoop();
