@@ -189,6 +189,33 @@ uint8_t incIPXaddr(uint8_t* ipxaddr)
 	return incIPXaddr2(&ipxaddr[5], 6); //Increment the IPX address to a valid address from the LSB!
 }
 
+uint8_t IPXaddrused(uint8_t* ipxaddr, Bit16u *ignoreentry)
+{
+	uint8_t rawipxaddr[6];
+	Bit16u i;
+	for (i=0;i<SOCKETTABLESIZE;++i)
+	{
+		if (ignoreentry)
+		{
+			if (i==*ignoreentry)
+			{
+				continue;
+			}
+		}
+		if (!connBuffer[i].connected)
+		{
+			continue;
+		}
+		memcpy(&rawipxaddr[0], &ipconnAssigned[i].host, 4); //Host!
+		memcpy(&rawipxaddr[4], &ipconnAssigned[i].port, 2); //Port!
+		if (memcmp(ipxaddr,&rawipxaddr,6)==0) //Found?
+		{
+			return connBuffer[i].connected; //Give the status!
+		}
+	}
+	return 0; //Not connected or pending allocation!
+}
+
 // From DosBox ipxserver.cpp - send packet to connected host
 void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	Bit16u srcport, destport;
@@ -379,6 +406,7 @@ static void requestClientEcho(int client) {
 void IPX_ServerLoop() {
 	UDPpacket inPacket;
 	IPaddress tmpAddr;
+	uint8_t ipxaddr[6];
 
 	Bit16u i;
 	Bit32u host;
@@ -411,6 +439,14 @@ void IPX_ServerLoop() {
 						{
 							connBuffer[i].connected = 2; //Requesting IPX address from the host!
 							//Send a echo request packet on the host network to detect for collisions on used addresses!
+							memcpy(&ipxaddr[0], &ipconnAssigned[i].host, 4); //Host!
+							memcpy(&ipxaddr[4], &ipconnAssigned[i].port, 2); //Port!
+							for (;IPXaddrused(&ipxaddr[0],&i);) //Skip addresses that are already being requested or used!
+							{
+								incIPXaddr(&ipxaddr[0]); //Next available address!
+								memcpy(&ipconnAssigned[i].host, &ipxaddr[0], 4); //Host!
+								memcpy(&ipconnAssigned[i].port, &ipxaddr[4], 2); //Port!
+							}
 
 							requestClientEcho(i); //Request a client echo packet!
 						}
@@ -569,6 +605,10 @@ void pcap_to_dosbox()
 								memcpy(&ipxaddr[0], &ipconnAssigned[i].host, 4); //Host!
 								memcpy(&ipxaddr[4], &ipconnAssigned[i].port, 2); //Port!
 								incIPXaddr(&ipxaddr[0]); //Next available address!
+								for (;IPXaddrused(&ipxaddr[0],&i);) //Skip addresses that are being requested or used!
+								{
+									incIPXaddr(&ipxaddr[0]); //Next available address!
+								}
 								memcpy(&ipconnAssigned[i].host, &ipxaddr[0], 4); //Host!
 								memcpy(&ipconnAssigned[i].port, &ipxaddr[4], 2); //Port!
 								PackIP(ipconnAssigned[i], &tmpHeader->src.addr.byIP);
