@@ -220,6 +220,16 @@ uint8_t IPXaddrused(uint8_t* ipxaddr, Bit16u *ignoreentry)
 	return 0; //Not connected or pending allocation!
 }
 
+//DESTNETWORKFILTER
+//And met any condition for the destination network (destination network 'current network' (zero) is only when source network is detected ours)?
+#define DESTNETWORKFILTER (dstnetworkcur & ((srcnetworkcur >> 1) | (srcnetworkcur >> 2) | srcnetworkcur | 6))
+//COMMONNETFILTER 
+//Source network current or broadcast?
+//Destination network current or broadcast?
+#define COMMONNETFILTER srcnetworkcur = (((!srcnetwork) ? 1 : 0) | ((srcnetwork == ipconnNetwork[i]) ? 2 : 0) | ((srcnetwork == 0xFFFFFFFF) ? 4 : 0)); \
+	dstnetworkcur = (((!dstnetwork) ? 1 : 0) | ((dstnetwork == ipconnNetwork[i]) ? 2 : 0) | ((dstnetwork == 0xFFFFFFFF) ? 4 : 0));
+
+
 // From DosBox ipxserver.cpp - send packet to connected host
 void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	Bit16u srcport, destport;
@@ -251,14 +261,13 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 		// Broadcast
 		for(i=0;i<SOCKETTABLESIZE;i++) {
 			if(connBuffer[i].connected==1) { //Ready for use?
-				srcnetworkcur = (((!srcnetwork)?1:0) | ((srcnetwork==ipconnNetwork[i])?2:0) | ((srcnetwork==0xFFFFFFFF)?4:0)); //Source network current or broadcast?
-				dstnetworkcur = (((!dstnetwork)?1:0) | ((dstnetwork==ipconnNetwork[i])?2:0) | ((dstnetwork==0xFFFFFFFF)?4:0)); //Destination network current or broadcast?
+				COMMONNETFILTER
 				#ifdef DEBUGNW
 				printf("Test BC network %08x: src=%08x dst=%08x ours=%08x srcflags=%01x, dstflags=%01x\n", i, srcnetwork, dstnetwork, ipconnNetwork[i],srcnetworkcur,dstnetworkcur); //Log it for testing!
 				#endif
 				if (
-					(!((ipconnAssigned[i].host == srchost)&&(ipconnAssigned[i].port==srcport)&&(srcnetworkcur&1))) //Not from ourselves on our own network?
-					&& (dstnetworkcur & ((srcnetworkcur >> 1) | (srcnetworkcur >> 2) | srcnetworkcur | 6)) //And met any condition for the destination network (destination network 'current network' (zero) is only when source network is detected ours)?
+					(!((ipconnAssigned[i].host == srchost)&&(ipconnAssigned[i].port==srcport)&&(srcnetworkcur&1))) && //Not from ourselves on our own network?
+					DESTNETWORKFILTER //And met any condition for the destination network (destination network 'current network' (zero) is only when source network is detected ours)?
 					) { //Valid to receive on this client?
 					#ifdef DEBUGNW
 					printf("Accepted condition!\n");
@@ -276,14 +285,12 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 		// Specific address
 		for(i=0;i<SOCKETTABLESIZE;i++) {
 			if(connBuffer[i].connected==1) { //Ready for use?
-				srcnetworkcur = (((!srcnetwork)?1:0) | ((srcnetwork==ipconnNetwork[i])?2:0) | ((srcnetwork==0xFFFFFFFF)?4:0)); //Source network current or broadcast?
-				dstnetworkcur = (((!dstnetwork)?1:0) | ((dstnetwork==ipconnNetwork[i])?2:0) | ((dstnetwork==0xFFFFFFFF)?4:0)); //Destination network current or broadcast?
+				COMMONNETFILTER
 				#ifdef DEBUGNW
 				printf("Test UC network %08x: src=%08x dst=%08x ours=%08x srcflags=%01x, dstflags=%01x\n", i, srcnetwork, dstnetwork, ipconnNetwork[i], srcnetworkcur, dstnetworkcur); //Log it for testing!
 				#endif
 				if ((ipconnAssigned[i].host == desthost) && (ipconnAssigned[i].port == destport) &&
-					(dstnetworkcur & ((srcnetworkcur >> 1) | (srcnetworkcur >> 2) | srcnetworkcur | 6)) //And met any condition for the destination network (destination network 'current network' (zero) is only when source network is detected ours)?
-					) { //Conditions match the client (on current or specified network)?
+					DESTNETWORKFILTER) { //Conditions match the client (on current or specified network)?
 					#ifdef DEBUGNW
 					printf("Accepted condition!\n");
 					#endif
