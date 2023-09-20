@@ -258,7 +258,7 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 				#endif
 				if (
 					(!((ipconnAssigned[i].host == srchost)&&(ipconnAssigned[i].port==srcport)&&(srcnetworkcur&1))) //Not from ourselves on our own network?
-					&& dstnetworkcur //And met any condition for the destination network?
+					&& (dstnetworkcur & ((srcnetworkcur >> 1) | (srcnetworkcur >> 2) | srcnetworkcur | 6)) //And met any condition for the destination network (destination network 'current network' (zero) is only when source network is detected ours)?
 					) { //Valid to receive on this client?
 					#ifdef DEBUGNW
 					printf("Accepted condition!\n");
@@ -281,7 +281,9 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 				#ifdef DEBUGNW
 				printf("Test UC network %08x: src=%08x dst=%08x ours=%08x srcflags=%01x, dstflags=%01x\n", i, srcnetwork, dstnetwork, ipconnNetwork[i], srcnetworkcur, dstnetworkcur); //Log it for testing!
 				#endif
-				if ((ipconnAssigned[i].host == desthost) && (ipconnAssigned[i].port == destport) && dstnetworkcur) { //Conditions match the client (on current or specified network)?
+				if ((ipconnAssigned[i].host == desthost) && (ipconnAssigned[i].port == destport) &&
+					(dstnetworkcur & ((srcnetworkcur >> 1) | (srcnetworkcur >> 2) | srcnetworkcur | 6)) //And met any condition for the destination network (destination network 'current network' (zero) is only when source network is detected ours)?
+					) { //Conditions match the client (on current or specified network)?
 					#ifdef DEBUGNW
 					printf("Accepted condition!\n");
 					#endif
