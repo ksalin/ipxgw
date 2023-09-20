@@ -341,6 +341,7 @@ static void ackClient(int client) {
 		printf("IPXSERVER: %s\n", SDLNet_GetError());
 		return; //Abort and don't perform the Ethernet ACK as well!
 	}
+	printf("ACK           -> box, IPX len=%i\n", regPacket.len);
 
 	//Also let the host network know that we allocated if on a Ethernet II network!
 	if (use_ethernetii) //Ethernet II used?
@@ -373,7 +374,7 @@ static void ackClient(int client) {
 		}
 		else
 		{
-			printf("ACK  -> real, IPX len=%i\n", regPacket.len);
+			printf("ACK           -> real, IPX len=%i\n", regPacket.len);
 		}
 	}
 }
@@ -408,6 +409,8 @@ static void requestClientEcho(int client) {
 	regPacket.maxlen = sizeof(regHeader);
 	regPacket.address = clientAddr; //Client's real address and port it's listening on!
 
+	printf("alloc request -> box, IPX len=%i\n", regPacket.len);
+
 	//Send to all Dosbox-clients to detect if they're used!
 	sendIPXPacket(regPacket.data, regPacket.len); //Send to all Dosbox clients!
 
@@ -433,7 +436,7 @@ static void requestClientEcho(int client) {
 		}
 		else
 		{
-			printf("alloc request  -> real, IPX len=%i\n", regPacket.len);
+			printf("alloc request -> real, IPX len=%i\n", regPacket.len);
 		}
 	}
 
@@ -526,6 +529,8 @@ void IPX_ServerLoop() {
 
 		// IPX packet is complete.  Now interpret IPX header and send to respective IP address
 		sendIPXPacket((Bit8u *)inPacket.data, inPacket.len);
+		printf("box           -> box, IPX len=%i\n", inPacket.len);
+
 
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
@@ -572,7 +577,7 @@ void IPX_ServerLoop() {
 		}
 		else
 		{
-			printf("box  -> real, IPX len=%i\n", inPacket.len);
+			printf("box           -> real, IPX len=%i\n", inPacket.len);
 		}
 	}
 }
@@ -626,7 +631,7 @@ void pcap_to_dosbox()
 			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
 			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
-			printf("real -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
+			printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 		}
 	}
 	else //Ethernet II?
@@ -679,7 +684,7 @@ void pcap_to_dosbox()
 				// Send to DOSBox
 				tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN);
 				sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN));
-				printf("real -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN));
+				printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN));
 			}
 
 			//Check for timers!
