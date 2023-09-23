@@ -329,7 +329,7 @@ static void ackClient(int client) {
 	SDLNet_Write32(ipconnNetwork[client], regHeader.src.network);
 	PackIP(ipxServerIp, &regHeader.src.addr.byIP);
 	SDLNet_Write16(0x2, regHeader.src.socket);
-	regHeader.transControl = 0;
+	regHeader.transControl = 1; //Prevent deadlock by checking this field (identify this as a reply)!
 
 	regPacket.data = (Uint8 *)&regHeader;
 	regPacket.len = sizeof(regHeader);
@@ -468,6 +468,7 @@ void IPX_ServerLoop() {
 		// For this, I just spoofed the echo protocol packet designation 0x02
 		IPXHeader *tmpHeader;
 		tmpHeader = (IPXHeader *)&inBuffer[0];
+		++tmpHeader->transControl; //Received, so increase the transport control field!
 	
 		// Check to see if echo packet
 		if(SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
@@ -629,6 +630,7 @@ void pcap_to_dosbox()
 
 			// Send to DOSBox
 			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
+			++tmpHeader->transControl; //Received, so increase the transport control field!
 			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
 			printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
@@ -647,7 +649,8 @@ void pcap_to_dosbox()
 				//Check for a registration packet.
 				// For this, I just spoofed the echo protocol packet designation 0x02
 				IPXHeader* tmpHeader;
-				tmpHeader = (IPXHeader*)&inBuffer[0x14]; //The IPX packet!
+				tmpHeader = (IPXHeader*)&packet[0x14]; //The IPX packet!
+				++tmpHeader->transControl; //Received, so increase the transport control field!
 
 				// Check to see if echo packet
 				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
