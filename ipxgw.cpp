@@ -536,6 +536,7 @@ void IPX_ServerLoop() {
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
 		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
+		--tmpHeader->transControl; //Received, don't increase the transport control field to count as a passthrough and let the receiving end apply this instead!
 
 		if (!use_ethernetii) //Not ethernet II?
 		{
