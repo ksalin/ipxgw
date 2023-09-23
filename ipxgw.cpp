@@ -469,7 +469,17 @@ void IPX_ServerLoop() {
 		IPXHeader *tmpHeader;
 		tmpHeader = (IPXHeader *)&inBuffer[0];
 		++tmpHeader->transControl; //Received, so increase the transport control field!
-	
+
+		if (SDLNet_Read32(tmpHeader->src.network)==0) { //Own network needs patching?
+			for(i=0;i<SOCKETTABLESIZE;i++) {
+				if(connBuffer[i].connected==1) {
+					if (memcmp(&inPacket.address,&ipconn[i])==0) { //Found client?
+						SDLNet_Write32(ipconnNetwork[client], tmpHeader->dest.network); //Fixup source network to client network!
+					}
+				}
+			}		
+		}
+		
 		// Check to see if echo packet
 		if(SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
 			// Null destination node means its a server registration packet
