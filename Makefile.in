@@ -1,0 +1,56 @@
+# Makefile to build and install the SDL library
+
+top_builddir = .
+srcdir  = @srcdir@
+objects = build
+gen = gen
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+bindir	= @bindir@
+libdir  = @libdir@
+includedir = @includedir@
+datarootdir = @datarootdir@
+datadir	= @datadir@
+auxdir	= @datarootdir@/aux
+distpath = $(srcdir)/..
+distdir = $(BUILD_NAME)-@SDL_VERSION@
+distfile = $(distdir).tar.gz
+
+#@SET_MAKE@
+SHELL	= @SHELL@
+CC      = @CC@
+INCLUDE = -I$(includedir)
+CFLAGS  = 
+EXTRA_CFLAGS = 
+LDFLAGS = 
+EXTRA_LDFLAGS = 
+LIBTOOL = libtool
+INSTALL = install
+AR	= ar
+RANLIB	= ranlib
+WINDRES	= windres
+
+all: ipxgw
+
+ipxgw: ipxgw.o
+	g++ -Wall ipxgw.o `pkg-config --libs SDL_net` -lpcap -o ipxgw
+
+ipxgw.o: ipxgw.cpp config.h
+	g++ -Wall `pkg-config --cflags SDL_net` -c ipxgw.cpp
+
+clean:
+	rm -fv *.o ipxgw
+
+install: ipxgw
+	$(info Installing...)
+#Requiring user rights for pcap
+#Make sure that the group exists
+	@groupadd -f pcap
+ifneq (,$(PCAPUSER))
+	usermod -a -G pcap $(PCAPUSER)
+endif
+	$(INSTALL) -m 0755 ipxgw $(bindir)
+	$(info Adding pcap rights...)
+#Set the pcap rights to the app!
+	@chgrp pcap $(bindir)/ipxgw
+	@setcap cap_net_raw,cap_net_admin=eip $(bindir)/ipxgw
