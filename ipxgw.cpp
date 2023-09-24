@@ -677,7 +677,7 @@ void pcap_to_dosbox()
 	else //Ethernet II?
 	{
 		if (pcap_next_ex(handle,&header,&packet)<=0) return; //Poll manually!
-		if ((packet != 0) && (header->len >= (14 + 30))) //Ethernet Header and IPX header minimum length?
+		if ((packet != 0) && (header->len >= (ETHER_HEADER_LEN + 30))) //Ethernet Header and IPX header minimum length?
 		{
 			if ((packet[12] == 0x81) && (packet[13] == 0x37)) //IPX?
 			{
@@ -687,7 +687,7 @@ void pcap_to_dosbox()
 				//Check for a registration packet.
 				// For this, I just spoofed the echo protocol packet designation 0x02
 				IPXHeader* tmpHeader;
-				tmpHeader = (IPXHeader*)&packet[0x14]; //The IPX packet!
+				tmpHeader = (IPXHeader*)&packet[ETHER_HEADER_LEN]; //The IPX packet!
 				++tmpHeader->transControl; //Received, so increase the transport control field!
 
 				// Check to see if echo packet
