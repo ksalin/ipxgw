@@ -329,7 +329,7 @@ static void ackClient(int client) {
 	SDLNet_Write32(ipconnNetwork[client], regHeader.src.network);
 	PackIP(ipxServerIp, &regHeader.src.addr.byIP);
 	SDLNet_Write16(0x2, regHeader.src.socket);
-	regHeader.transControl = 1; //Prevent deadlock by checking this field (identify this as a reply)!
+	regHeader.transControl = 0;
 
 	regPacket.data = (Uint8 *)&regHeader;
 	regPacket.len = sizeof(regHeader);
@@ -468,18 +468,7 @@ void IPX_ServerLoop() {
 		// For this, I just spoofed the echo protocol packet designation 0x02
 		IPXHeader *tmpHeader;
 		tmpHeader = (IPXHeader *)&inBuffer[0];
-		++tmpHeader->transControl; //Received, so increase the transport control field!
-
-		if (SDLNet_Read32(tmpHeader->src.network)==0) { //Own network needs patching?
-			for(i=0;i<SOCKETTABLESIZE;i++) {
-				if(connBuffer[i].connected==1) {
-					if (memcmp(&inPacket.address,&ipconn[i],4)==0) { //Found client?
-						SDLNet_Write32(ipconnNetwork[i], tmpHeader->dest.network); //Fixup source network to client network!
-					}
-				}
-			}		
-		}
-		
+	
 		// Check to see if echo packet
 		if(SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
 			// Null destination node means its a server registration packet
@@ -546,7 +535,6 @@ void IPX_ServerLoop() {
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
 		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
-		--tmpHeader->transControl; //Received, don't increase the transport control field to count as a passthrough and let the receiving end apply this instead!
 
 		if (!use_ethernetii) //Not ethernet II?
 		{
@@ -641,7 +629,6 @@ void pcap_to_dosbox()
 
 			// Send to DOSBox
 			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
-			++tmpHeader->transControl; //Received, so increase the transport control field!
 			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
 			printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
@@ -660,8 +647,7 @@ void pcap_to_dosbox()
 				//Check for a registration packet.
 				// For this, I just spoofed the echo protocol packet designation 0x02
 				IPXHeader* tmpHeader;
-				tmpHeader = (IPXHeader*)&packet[0x14]; //The IPX packet!
-				++tmpHeader->transControl; //Received, so increase the transport control field!
+				tmpHeader = (IPXHeader*)&inBuffer[0x14]; //The IPX packet!
 
 				// Check to see if echo packet
 				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
@@ -733,6 +719,7 @@ int main(int argc, char *argv[])
 	int port = 213;
 	bool help = false;
 	int c;
+	bool networkspecified = false;
 
 	while ((c = getopt (argc, argv, "p:n:rhe")) != -1)
 		switch (c)
@@ -742,6 +729,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'n':
 			use_IPXnetworknumber = atoi(optarg);
+			networkspecified = true; //Specified!
 			break;
 		case 'r':
 			use_llc = false;
@@ -812,6 +800,11 @@ int main(int argc, char *argv[])
 	}
 	if (SDLNet_UDP_AddSocket(socketSet, &sdlnet_pcap) == -1) {
 		errx(1, "SDLNet_AddSocket: %s\n", SDLNet_GetError());
+	}
+
+	if (networkspecified) //Network number specified by the user?
+	{
+		printf("Using network number %i\n", use_IPXnetworknumber); //Display the network number used!
 	}
 	
 	printf("\nYou can now write somewhere, on some DOSBox(es):\nIPXNET CONNECT <this host's ip> %i\n", port);
