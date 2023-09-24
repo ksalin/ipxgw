@@ -474,7 +474,7 @@ void IPX_ServerLoop() {
 			for(i=0;i<SOCKETTABLESIZE;i++) {
 				if(connBuffer[i].connected==1) {
 					if (memcmp(&inPacket.address,&ipconn[i],4)==0) { //Found client?
-						SDLNet_Write32(ipconnNetwork[i], tmpHeader->dest.network); //Fixup source network to client network!
+						SDLNet_Write32(ipconnNetwork[i], tmpHeader->src.network); //Fixup source network to client network!
 					}
 				}
 			}		
