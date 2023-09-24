@@ -473,8 +473,8 @@ void IPX_ServerLoop() {
 		if (SDLNet_Read32(tmpHeader->src.network)==0) { //Own network needs patching?
 			for(i=0;i<SOCKETTABLESIZE;i++) {
 				if(connBuffer[i].connected==1) {
-					if (memcmp(&inPacket.address,&ipconn[i])==0) { //Found client?
-						SDLNet_Write32(ipconnNetwork[client], tmpHeader->dest.network); //Fixup source network to client network!
+					if (memcmp(&inPacket.address,&ipconn[i],4)==0) { //Found client?
+						SDLNet_Write32(ipconnNetwork[i], tmpHeader->dest.network); //Fixup source network to client network!
 					}
 				}
 			}		
