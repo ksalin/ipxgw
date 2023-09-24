@@ -251,8 +251,11 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	Bits result;
 	Bit32u srcnetwork, dstnetwork;
 	Bit8u srcnetworkcur, dstnetworkcur; //Flags reflecting different network conditions
+#ifdef DEBUGNW
 	char ipxdst[20], ipxcur[20];
 	uint8_t ipxnode[6]; //IPX node number!
+#endif
+
 	UDPpacket outPacket;
 	outPacket.channel = -1;
 	outPacket.data = buffer;
@@ -260,7 +263,9 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	outPacket.maxlen = bufSize;
 	IPXHeader *tmpHeader;
 	tmpHeader = (IPXHeader *)buffer;
+#ifdef DEBUGNW
 	ipxdst[0] = ipxcur[0] = (char)0; //Init!
+#endif
 
 	srchost = tmpHeader->src.addr.byIP.host;
 	desthost = tmpHeader->dest.addr.byIP.host;
