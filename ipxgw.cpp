@@ -329,7 +329,8 @@ static void ackClient(int client) {
 	SDLNet_Write32(ipconnNetwork[client], regHeader.src.network);
 	PackIP(ipxServerIp, &regHeader.src.addr.byIP);
 	SDLNet_Write16(0x2, regHeader.src.socket);
-	regHeader.transControl = 1; //Prevent deadlock by checking this field (identify this as a reply)!
+	regHeader.transControl = 0;
+	regHeader.pType = 2; //Echo reply!
 
 	regPacket.data = (Uint8 *)&regHeader;
 	regPacket.len = sizeof(regHeader);
@@ -403,6 +404,8 @@ static void requestClientEcho(int client) {
 	memset(&regHeader.dest.addr.byNode.node, 0xFF, 6); //Broadcast it!
 	SDLNet_Write16(0x2, regHeader.dest.socket);
 	regHeader.transControl = 0;
+	regHeader.pType = 0; //Echo request!
+
 
 	regPacket.data = (Uint8*)&regHeader;
 	regPacket.len = sizeof(regHeader);
