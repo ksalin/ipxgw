@@ -501,6 +501,10 @@ void IPX_ServerLoop() {
 		IPXHeader *tmpHeader;
 		tmpHeader = (IPXHeader *)&inBuffer[0];
 		++tmpHeader->transControl; //Received, so increase the transport control field!
+		if (tmpHeader->transControl>=16) //16th hop discards?
+		{
+			return; //Discard!
+		}
 
 		if (SDLNet_Read32(tmpHeader->src.network)==0) { //Own network needs patching?
 			for(i=0;i<SOCKETTABLESIZE;i++) {
@@ -674,6 +678,10 @@ void pcap_to_dosbox()
 			// Send to DOSBox
 			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
 			++tmpHeader->transControl; //Received, so increase the transport control field!
+			if (tmpHeader->transControl>=16) //16th hop discards?
+			{
+				return; //Discard the packet!
+			}
 			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
 			printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
@@ -694,6 +702,10 @@ void pcap_to_dosbox()
 				IPXHeader* tmpHeader;
 				tmpHeader = (IPXHeader*)&packet[ETHER_HEADER_LEN]; //The IPX packet!
 				++tmpHeader->transControl; //Received, so increase the transport control field!
+				if (tmpHeader->transControl>=16) //16th hop discards the packet!
+				{
+					return; //Discard the packet!
+				}
 
 				// Check to see if echo packet
 				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
