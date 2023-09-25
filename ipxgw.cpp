@@ -505,6 +505,10 @@ void IPX_ServerLoop() {
 		{
 			return; //Discard!
 		}
+		if (memcmp(&tmpHeader->src.addr.byNode.node,&ipxbroadcastaddr,6)==0) //Broadcast source is forbidden?
+		{
+			return; //Discard!
+		}
 
 		if (SDLNet_Read32(tmpHeader->src.network)==0) { //Own network needs patching?
 			for(i=0;i<SOCKETTABLESIZE;i++) {
@@ -682,6 +686,11 @@ void pcap_to_dosbox()
 			{
 				return; //Discard the packet!
 			}
+			if (memcmp(&tmpHeader->src.addr.byNode.node,&ipxbroadcastaddr,6)==0) //Broadcast source is forbidden?
+			{
+				return; //Discard!
+			}
+			
 			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
 			printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
@@ -706,6 +715,11 @@ void pcap_to_dosbox()
 				{
 					return; //Discard the packet!
 				}
+				if (memcmp(&tmpHeader->src.addr.byNode.node,&ipxbroadcastaddr,6)==0) //Broadcast source is forbidden?
+				{
+					return; //Discard!
+				}
+				
 
 				// Check to see if echo packet
 				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
