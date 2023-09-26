@@ -148,6 +148,10 @@ void mac_to_string(const u_char mac[], char *str)
 {
 	sprintf(str, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
+void ipxnode_to_string(const u_char ipx[], char* str)
+{
+	sprintf(str, "%02x:%02x:%02x:%02x:%02x:%02x", ipx[0], ipx[1], ipx[2], ipx[3], ipx[4], ipx[5]);
+}
 
 //Below IPX address functions and some reserved addresses copied from UniPCemu.
 //result: 1 for OK address. 0 for overflow! NULL and Broadcast and special addresses are skipped automatically. addrsizeleft should be 6 (the size of an IPX address)
@@ -229,6 +233,15 @@ uint8_t IPXaddrused(uint8_t* ipxaddr, Bit16u *ignoreentry)
 #define COMMONNETFILTER srcnetworkcur = (((!srcnetwork) ? 1 : 0) | ((srcnetwork == ipconnNetwork[i]) ? 2 : 0) | ((srcnetwork == 0xFFFFFFFF) ? 4 : 0)); \
 	dstnetworkcur = (((!dstnetwork) ? 1 : 0) | ((dstnetwork == ipconnNetwork[i]) ? 2 : 0) | ((dstnetwork == 0xFFFFFFFF) ? 4 : 0));
 
+void get_ipxaddr(uint8_t *addr, Bit32u host, Bit16u port) //Convert a host:port to IPX address!
+{
+	addr[0] = (host >> 0) & 0xff;
+	addr[1] = (host >> 8) & 0xff;
+	addr[2] = (host >> 16) & 0xff;
+	addr[3] = (host >> 24) & 0xff;
+	addr[4] = (port & 0xff);
+	addr[5] = (port >> 8) & 0xff;
+}
 
 // From DosBox ipxserver.cpp - send packet to connected host
 void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
@@ -238,6 +251,11 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	Bits result;
 	Bit32u srcnetwork, dstnetwork;
 	Bit8u srcnetworkcur, dstnetworkcur; //Flags reflecting different network conditions
+#ifdef DEBUGNW
+	char ipxdst[20], ipxcur[20];
+	uint8_t ipxnode[6]; //IPX node number!
+#endif
+
 	UDPpacket outPacket;
 	outPacket.channel = -1;
 	outPacket.data = buffer;
@@ -245,6 +263,9 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 	outPacket.maxlen = bufSize;
 	IPXHeader *tmpHeader;
 	tmpHeader = (IPXHeader *)buffer;
+#ifdef DEBUGNW
+	ipxdst[0] = ipxcur[0] = (char)0; //Init!
+#endif
 
 	srchost = tmpHeader->src.addr.byIP.host;
 	desthost = tmpHeader->dest.addr.byIP.host;
@@ -264,6 +285,7 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 				COMMONNETFILTER
 				#ifdef DEBUGNW
 				printf("Test BC network %08x: src=%08x dst=%08x ours=%08x srcflags=%01x, dstflags=%01x\n", i, srcnetwork, dstnetwork, ipconnNetwork[i],srcnetworkcur,dstnetworkcur); //Log it for testing!
+				printf("Test BC network %08x: filter: %i\n", i, ((DESTNETWORKFILTER) ? 1 : 0)); //Log it for testing!
 				#endif
 				if (
 					(!((ipconnAssigned[i].host == srchost)&&(ipconnAssigned[i].port==srcport)&&(srcnetworkcur&1))) && //Not from ourselves on our own network?
@@ -287,8 +309,15 @@ void sendIPXPacket(Bit8u *buffer, Bit16s bufSize) {
 			if(connBuffer[i].connected==1) { //Ready for use?
 				COMMONNETFILTER
 				#ifdef DEBUGNW
-				printf("Test UC network %08x: src=%08x dst=%08x ours=%08x srcflags=%01x, dstflags=%01x\n", i, srcnetwork, dstnetwork, ipconnNetwork[i], srcnetworkcur, dstnetworkcur); //Log it for testing!
+				printf("Test UC network %02x: src=%08x dst=%08x ours=%08x srcflags=%01x, dstflags=%01x\n", i, srcnetwork, dstnetwork, ipconnNetwork[i], srcnetworkcur, dstnetworkcur); //Log it for testing!
+				printf("Test UC network %02x: filter: %i\n", i, ((DESTNETWORKFILTER)?1:0)); //Log it for testing!
+				get_ipxaddr(&ipxnode[0], desthost, destport); //Convert!
+				ipxnode_to_string(ipxnode, &ipxdst[0]); //Convert!
+				get_ipxaddr(&ipxnode[0], ipconnAssigned[i].host, ipconnAssigned[i].port); //Convert!
+				ipxnode_to_string(ipxnode, &ipxcur[0]); //Convert!
+				printf("Dest            %02x: dst=%s cur=%s\n", i, ipxdst, ipxcur); //Log destination comparision!
 				#endif
+
 				if ((ipconnAssigned[i].host == desthost) && (ipconnAssigned[i].port == destport) &&
 					DESTNETWORKFILTER) { //Conditions match the client (on current or specified network)?
 					#ifdef DEBUGNW
@@ -330,6 +359,7 @@ static void ackClient(int client) {
 	PackIP(ipxServerIp, &regHeader.src.addr.byIP);
 	SDLNet_Write16(0x2, regHeader.src.socket);
 	regHeader.transControl = 0;
+	regHeader.pType = 2; //Echo reply!
 
 	regPacket.data = (Uint8 *)&regHeader;
 	regPacket.len = sizeof(regHeader);
@@ -403,6 +433,8 @@ static void requestClientEcho(int client) {
 	memset(&regHeader.dest.addr.byNode.node, 0xFF, 6); //Broadcast it!
 	SDLNet_Write16(0x2, regHeader.dest.socket);
 	regHeader.transControl = 0;
+	regHeader.pType = 0; //Echo request!
+
 
 	regPacket.data = (Uint8*)&regHeader;
 	regPacket.len = sizeof(regHeader);
@@ -468,7 +500,26 @@ void IPX_ServerLoop() {
 		// For this, I just spoofed the echo protocol packet designation 0x02
 		IPXHeader *tmpHeader;
 		tmpHeader = (IPXHeader *)&inBuffer[0];
-	
+		++tmpHeader->transControl; //Received, so increase the transport control field!
+		if (tmpHeader->transControl>=16) //16th hop discards?
+		{
+			return; //Discard!
+		}
+		if (memcmp(&tmpHeader->src.addr.byNode.node,&ipxbroadcastaddr,6)==0) //Broadcast source is forbidden?
+		{
+			return; //Discard!
+		}
+
+		if (SDLNet_Read32(tmpHeader->src.network)==0) { //Own network needs patching?
+			for(i=0;i<SOCKETTABLESIZE;i++) {
+				if(connBuffer[i].connected==1) {
+					if (memcmp(&inPacket.address,&ipconn[i],4)==0) { //Found client?
+						SDLNet_Write32(ipconnNetwork[i], tmpHeader->src.network); //Fixup source network to client network!
+					}
+				}
+			}		
+		}
+		
 		// Check to see if echo packet
 		if(SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
 			// Null destination node means its a server registration packet
@@ -535,6 +586,7 @@ void IPX_ServerLoop() {
 		// Create and send packet received from DosBox to the real network
 		unsigned char ethernet[1500];
 		memset(&ethernet, 0, sizeof(ethernet)); //Clear!
+		--tmpHeader->transControl; //Received, don't increase the transport control field to count as a passthrough and let the receiving end apply this instead!
 
 		if (!use_ethernetii) //Not ethernet II?
 		{
@@ -629,6 +681,16 @@ void pcap_to_dosbox()
 
 			// Send to DOSBox
 			IPXHeader* tmpHeader = (IPXHeader*)(packet + ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0));
+			++tmpHeader->transControl; //Received, so increase the transport control field!
+			if (tmpHeader->transControl>=16) //16th hop discards?
+			{
+				return; //Discard the packet!
+			}
+			if (memcmp(&tmpHeader->src.addr.byNode.node,&ipxbroadcastaddr,6)==0) //Broadcast source is forbidden?
+			{
+				return; //Discard!
+			}
+			
 			sendIPXPacket((Bit8u*)tmpHeader, header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
 
 			printf("real          -> box , IPX len=%i\n", header->len - (ETHER_HEADER_LEN + (use_llc ? ENCAPSULE_LEN : 0)));
@@ -637,7 +699,7 @@ void pcap_to_dosbox()
 	else //Ethernet II?
 	{
 		if (pcap_next_ex(handle,&header,&packet)<=0) return; //Poll manually!
-		if ((packet != 0) && (header->len >= (14 + 30))) //Ethernet Header and IPX header minimum length?
+		if ((packet != 0) && (header->len >= (ETHER_HEADER_LEN + 30))) //Ethernet Header and IPX header minimum length?
 		{
 			if ((packet[12] == 0x81) && (packet[13] == 0x37)) //IPX?
 			{
@@ -647,7 +709,17 @@ void pcap_to_dosbox()
 				//Check for a registration packet.
 				// For this, I just spoofed the echo protocol packet designation 0x02
 				IPXHeader* tmpHeader;
-				tmpHeader = (IPXHeader*)&inBuffer[0x14]; //The IPX packet!
+				tmpHeader = (IPXHeader*)&packet[ETHER_HEADER_LEN]; //The IPX packet!
+				++tmpHeader->transControl; //Received, so increase the transport control field!
+				if (tmpHeader->transControl>=16) //16th hop discards the packet!
+				{
+					return; //Discard the packet!
+				}
+				if (memcmp(&tmpHeader->src.addr.byNode.node,&ipxbroadcastaddr,6)==0) //Broadcast source is forbidden?
+				{
+					return; //Discard!
+				}
+				
 
 				// Check to see if echo packet
 				if (SDLNet_Read16(tmpHeader->dest.socket) == 0x2) {
@@ -719,6 +791,7 @@ int main(int argc, char *argv[])
 	int port = 213;
 	bool help = false;
 	int c;
+	bool networkspecified = false;
 
 	while ((c = getopt (argc, argv, "p:n:rhe")) != -1)
 		switch (c)
@@ -728,6 +801,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'n':
 			use_IPXnetworknumber = atoi(optarg);
+			networkspecified = true; //Specified!
 			break;
 		case 'r':
 			use_llc = false;
@@ -798,6 +872,11 @@ int main(int argc, char *argv[])
 	}
 	if (SDLNet_UDP_AddSocket(socketSet, &sdlnet_pcap) == -1) {
 		errx(1, "SDLNet_AddSocket: %s\n", SDLNet_GetError());
+	}
+
+	if (networkspecified) //Network number specified by the user?
+	{
+		printf("Using network number %i\n", use_IPXnetworknumber); //Display the network number used!
 	}
 	
 	printf("\nYou can now write somewhere, on some DOSBox(es):\nIPXNET CONNECT <this host's ip> %i\n", port);
