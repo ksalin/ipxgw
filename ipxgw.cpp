@@ -789,16 +789,19 @@ void clean_shutdown(int signum)
 int main(int argc, char *argv[])
 {
 	int port = 213;
+	int timeout = 0;
 	bool help = false;
 	int c;
 	bool networkspecified = false;
 
-	while ((c = getopt (argc, argv, "p:n:rhe")) != -1)
+	while ((c = getopt (argc, argv, "p:n:t:rhe")) != -1)
 		switch (c)
 		{
 		case 'p':
 			port = atoi(optarg);
 			break;
+		case 't':
+			timeout = atoi(optarg);
 		case 'n':
 			use_IPXnetworknumber = atoi(optarg);
 			networkspecified = true; //Specified!
@@ -811,6 +814,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'h':
 			help = true;
+			break;
 		case '?':
 			exit(1);
 		default:
@@ -820,11 +824,13 @@ int main(int argc, char *argv[])
 	// Command line parameters
 	if (optind+1 != argc || help)
 	{
-		errx(1, "Usage: %s IF [-p PORT]\n\n"
+		errx(1, "Usage: %s IF [-p PORT] [-t TIMEOUT]\n\n"
 		     "Forwards IPX traffic between network interface "
 		     "IF where the real\ncomputers are located and DOSBox "
 		     "IPXNET.\n\nParameters:\n"
 		     " -p  UDP port where DOSBox connects to, defaults to 213\n"
+		     " -t  Packet read timeout in milliseconds\n"
+		     "     (Screamer Rally is unplayable without this option)\n"
 		     " -n  IPX network number to use, defaults to 0\n"
 		     " -r  Use Novell raw IEEE 802.3 instead of LLC (IEEE 802.2)\n"
 		     " -e  Use Ethernet II instead of 802.3/802.2",
@@ -834,7 +840,7 @@ int main(int argc, char *argv[])
 	strncpy(device, argv[optind], sizeof(device));
 
 	// Open interface that has real DOS machine, in promiscuous mode
-	handle = pcap_open_live(device, BUFSIZ, 1, 0, errbuf);
+	handle = pcap_open_live(device, BUFSIZ, 1, timeout, errbuf);
 	if (!handle)
 	{
 		printf("Couldn't open device %s for pcap: %s\n", device, errbuf);
@@ -842,7 +848,9 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		printf("Opened device %s for pcap\n", device);
+		printf("Opened device %s for pcap, "
+				"with a packet read timeout of %i\n"
+				, device, timeout);
 	}
 
 	// Start DosBox IPX server
