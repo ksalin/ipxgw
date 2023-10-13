@@ -18,6 +18,8 @@ running Debian or Ubuntu, install requirements by running:
 Then just:
 
 	make
+	
+There is also autotools support added.
 
 ## Usage
 
@@ -49,6 +51,8 @@ network, to prevent conflicting IPX node numbers.
 
 More information at [Wikipedia](https://en.wikipedia.org/wiki/Ethernet_frame#Novell_raw_IEEE_802.3).
 
+To see other available parameters, use -h for help.
+
 ## DOSBox configuration
 
 More comprehensively documented in
@@ -74,8 +78,7 @@ IPXNET CONNECT 10.0.0.1 213
 
 We were lazy and so config.h has some hard-coded values. They should
 suffice for most users and the code compiles and works at least with
-both AMD64 Linux system and 32-bit Raspberry Pi. This has no
-autoconf - just run make.
+both AMD64 Linux system and 32-bit Raspberry Pi.
 
 This is untested with combination of multiple real DOS computers, but it
 works with at least one. Problem might also be if you use a switch and not
@@ -90,11 +93,11 @@ games, as long as you can run the server.
 
 The code could be improved a lot as it was just quickly hacked together
 and then made to work with help of some wireshark debugging. Feel free
-to improve it as the license allows. My e-mail is salinjus@gmail.com.
+to improve it as the license allows.
 
 ## License
 
-Copyright (C) 2015 Jussi Salin  
+Copyright (C) 2015, 2023 Kati Salin
 Copyright (C) 2020 Joel Lehtonen
 
 Licenced under the terms of the GNU General Public License as
@@ -102,4 +105,3 @@ published by the Free Software Foundation; either version 2 of the
 License, or (at your option) any later version.
 
 Contains parts from DOSBox source code by The DOSBox Team, under GPLv2
-
