@@ -1,0 +1,5 @@
+AC_INIT([ipxgw], [1.0])
+# AM_INIT_AUTOMAKE
+AC_PROG_CC
+AC_CONFIG_FILES([Makefile:Makefile.in])
+AC_OUTPUT
