@@ -802,6 +802,7 @@ int main(int argc, char *argv[])
 			break;
 		case 't':
 			timeout = atoi(optarg);
+			break;
 		case 'n':
 			use_IPXnetworknumber = atoi(optarg);
 			networkspecified = true; //Specified!
